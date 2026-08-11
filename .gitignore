@@ -1,0 +1,19 @@
+# data & model artifacts (too large / not for version control)
+data/
+model/
+model_py311/
+baseline_submit/
+*.zip
+*.pkl
+
+# python envs
+.venv/
+.venv311/
+__pycache__/
+*.pyc
+
+# os
+.DS_Store
+
+# jupyter
+.ipynb_checkpoints/
