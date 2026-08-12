@@ -17,3 +17,6 @@ __pycache__/
 
 # jupyter
 .ipynb_checkpoints/
+
+# AutoGluon local run artifacts (large, regenerable)
+AutogluonModels/
