@@ -20,3 +20,6 @@ __pycache__/
 
 # AutoGluon local run artifacts (large, regenerable)
 AutogluonModels/
+
+# CatBoost local training logs (regenerable)
+catboost_info/
