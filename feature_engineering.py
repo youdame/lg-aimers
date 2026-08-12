@@ -79,3 +79,25 @@ def add_engineered_features(df, league_success_mean):
     df['count_pressure'] = df['pitcher_relative_success'] * pressure_signal
 
     return df
+
+
+def add_experimental_features(df):
+    """add_engineered_features() 이후에 호출. count_diff/is_full_count 등에 의존하므로 순서 주의.
+    창현님 원본 피처와 구분하기 위해 별도 함수로 분리한 신규 실험 피처."""
+    df = df.copy()
+
+    # 1. 주자 상황 x 투수 성향 교차 (기존엔 볼카운트 압박만 있었고 주자 압박은 미반영)
+    df['runner_pressure_reverse'] = df['num_runners_on'] * df['asof_pitcher_reverse_rate']
+    df['runner_pressure_middle'] = df['num_runners_on'] * df['asof_pitcher_middle_rate']
+    scoring_position = ((df['runner_on_2b'] == 1) | (df['runner_on_3b'] == 1)).astype(np.int64)
+    df['scoring_position_reverse'] = scoring_position * df['asof_pitcher_reverse_rate']
+
+    # 2. home/away_win_expectancy 미활용 컬럼 활용 (li와 별개로 "얼마나 접전인지" 표현)
+    df['win_expectancy_gap'] = (df['home_win_expectancy'] - df['away_win_expectancy']).abs()
+
+    # 3. 구종 믹스 x 카운트 교차 (풀카운트/유리한카운트에서 구종 비중이 다르게 작용하는지)
+    df['fastball_count_interaction'] = df['asof_pitcher_fastball_rate'] * df['count_diff']
+    df['breaking_fullcount_interaction'] = df['asof_pitcher_breaking_rate'] * df['is_full_count']
+    df['offspeed_pressure'] = df['asof_pitcher_offspeed_rate'] * df['li']
+
+    return df

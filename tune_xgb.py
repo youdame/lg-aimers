@@ -5,7 +5,7 @@ import optuna
 import pandas as pd
 from xgboost import XGBClassifier
 
-from feature_engineering import process_trackman_features_safe, add_engineered_features
+from feature_engineering import process_trackman_features_safe, add_engineered_features, add_experimental_features
 
 N_TRIALS = int(os.environ.get("TUNE_TRIALS", 30))
 DATA_DIR = "./data"
@@ -20,6 +20,11 @@ def compute_bss(preds, y):
     return 1.0 - (brier / baseline_brier)
 
 
+def brier_eval(y_true, y_pred):
+    """조기종료 기준을 logloss 대신 대회 채점 지표(Brier)에 직접 맞춤."""
+    return float(((y_pred - y_true) ** 2).mean())
+
+
 def build_data():
     df = pd.read_csv(os.path.join(DATA_DIR, "train.csv"))
     df_trm = pd.read_csv(os.path.join(DATA_DIR, "trackman_history.csv"))
@@ -32,6 +37,7 @@ def build_data():
 
     league_success_mean = train_df.loc[train_mask, TARGET].mean()
     train_df = add_engineered_features(train_df, league_success_mean)
+    train_df = add_experimental_features(train_df)
 
     drop_cols = ["row_id", TARGET]
     features = [col for col in train_df.columns if col not in drop_cols]
@@ -50,18 +56,20 @@ def make_objective(X_train, y_train, X_val, y_val):
     def objective(trial):
         t0 = time.time()
         params = dict(
-            n_estimators=2000,
-            max_depth=trial.suggest_int("max_depth", 3, 8),
-            learning_rate=trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
-            subsample=trial.suggest_float("subsample", 0.5, 1.0),
-            colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1.0),
-            reg_lambda=trial.suggest_float("reg_lambda", 1e-2, 30.0, log=True),
-            reg_alpha=trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True),
-            min_child_weight=trial.suggest_int("min_child_weight", 1, 200, log=True),
-            gamma=trial.suggest_float("gamma", 1e-3, 5.0, log=True),
+            n_estimators=2500,
+            # 1차 탐색(30 trials) 결과 상위권(Trial 020/023/026/028/029)이 모여있던
+            # 구간으로 좁힌 2차 탐색 범위.
+            max_depth=trial.suggest_int("max_depth", 6, 9),
+            learning_rate=trial.suggest_float("learning_rate", 0.008, 0.03, log=True),
+            subsample=trial.suggest_float("subsample", 0.55, 0.85),
+            colsample_bytree=trial.suggest_float("colsample_bytree", 0.75, 1.0),
+            reg_lambda=trial.suggest_float("reg_lambda", 0.02, 3.0, log=True),
+            reg_alpha=trial.suggest_float("reg_alpha", 0.3, 10.0, log=True),
+            min_child_weight=trial.suggest_int("min_child_weight", 5, 40, log=True),
+            gamma=trial.suggest_float("gamma", 5e-4, 0.05, log=True),
             tree_method="hist",
             enable_categorical=True,
-            eval_metric="logloss",
+            eval_metric=brier_eval,
             early_stopping_rounds=30,
             random_state=42,
             n_jobs=-1,
