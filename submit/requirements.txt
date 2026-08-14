@@ -1,0 +1,3 @@
+# torch, pandas, numpy, scikit-learn은 평가 서버에 기본 설치되어 있어 여기 명시하지 않습니다.
+# catboost는 기본 설치되어 있지 않으므로 명시적으로 pin합니다 (학습에 쓴 로컬 버전과 동일하게).
+catboost==1.2.10
