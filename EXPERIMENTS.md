@@ -4,6 +4,14 @@
 검증은 기본적으로 `season==2024` 단일 홀드아웃이었으나, **단일 시즌 검증은 신뢰도가
 낮다는 게 확인되어(아래 F1 섹션 참고) 2023+2024 두 시즌 평균으로 전환 중.**
 
+## 내일 TODO (2026-08-17, 우선순위 순 — 상세는 §6 참고)
+
+1. 블렌드 alpha 재검증 마무리(`experiment_final_blend_f1_dual.py`, 밤새 안 끝났으면 확인) → `BLEND_ALPHA` 갱신
+2. `full_retrain_blend_f1.py` 전체 재학습 (튜닝된 하이퍼파라미터+quantile PLE+same_hand 다 반영된 상태)
+3. 로컬 5행 스모크 테스트 (CLAUDE.md 규칙, 제출 전 필수)
+4. **실제 제출** → 리더보드 확인 (하루 5회 제한)
+5. 여유 되면: season fallback 수정(§6-12) 별도 제출 테스트, 트랙맨 물리량 시즌필터 불일치(§6-13) 수정+재검증, `asof_batter_*` 확장, 메타모델 스태킹, 전년도 트랙맨 조인+std
+
 ## 현재 최고 기록
 
 | 구분 | 점수 |
@@ -112,6 +120,49 @@ F1 없이는 2023 검증 점수가 완전히 붕괴(XGBoost 0.00, CatBoost 3.88)
 
 **구종비중과 F1을 동시에 적용한 조합은 아직 실제 제출/전체재학습 안 해봄 — 진행 중.**
 
+### 1-6. same_hand / same_hand_advantage (팀원 노트 확인, 2026-08-16)
+
+투수-타자가 같은 손(좌/좌 또는 우/우)인지 플래그(`same_hand`) + "리그 평균 대비 잘하는
+투수가 같은 손 매치업에서 유독 다른지" 교차 피처(`same_hand_advantage = pitcher_relative_success * same_hand`).
+`add_engineered_features()`(`feature_engineering.py`, `submit/script.py` 양쪽)에 반영.
+
+구종비중+F1 베이스 위에 XGBoost로 2023+2024 이중검증(`experiment_same_hand.py`):
+
+| 시즌 | 적용 전 | 적용 후 | Δ |
+|---|---|---|---|
+| 2023 | 606.25 | 621.88 | +15.63 |
+| 2024 | 752.16 | 766.22 | +14.06 |
+| **평균** | 679.21 | 694.05 | **+14.85** |
+
+두 시즌 다 일관되게 개선 — XGBoost는 채택.
+
+**CatBoost는 정반대(`experiment_same_hand_catboost.py`, 2026-08-16)**:
+
+| 시즌 | 적용 전 | 적용 후 | Δ |
+|---|---|---|---|
+| 2023 | 613.49 | 582.43 | -31.06 |
+| 2024 | 780.82 | 779.36 | -1.46 |
+| **평균** | 697.16 | 680.89 | **-16.26** |
+
+**MLP는 셋 중 제일 크게 개선(`experiment_same_hand_mlp.py`, 튜닝된 하이퍼파라미터+quantile
+PLE 반영 상태 기준, 2026-08-16)**:
+
+| 시즌 | 적용 전 | 적용 후 | Δ |
+|---|---|---|---|
+| 2023 | 542.69 | 557.97 | +15.28 |
+| 2024 | 785.47 | 865.99 | +80.52 |
+| **평균** | 664.08 | 711.98 | **+47.90** |
+
+구종비중 때와 달리 "MLP는 원재료를 이미 갖고 있어서 스스로 학습 가능하니 명시적 피처가
+필요 없다"는 패턴이 재현 안 됨 — `same_hand_advantage`는 연속값×이진플래그 게이팅
+구조라 MLP가 스스로 발견하기 더 어려웠던 것으로 추정.
+
+**최종 결론 — 모델별로 다르게 적용**: XGBoost(+14.85)/MLP(+47.90)엔 채택, CatBoost(-16.26)엔
+제외. 두 모델이 같은 데이터프레임을 쓰지만 독립적으로 학습되는 구조라 비대칭 적용
+가능 — `full_retrain_blend_f1.py`(CatBoost Pool 구성 시 `CATBOOST_EXCLUDE_COLS`로 제외)와
+`submit/script.py`(CatBoost 예측 시 동일하게 제외) 양쪽에 반영 완료. MLP/XGBoost 쪽은
+그대로 유지(이미 `add_engineered_features()`에 포함돼 있어 전체 피처셋에 남아있음).
+
 ## 2. 효과 없었던 것 (재시도 불필요)
 
 | 시도 | 결과 |
@@ -144,7 +195,14 @@ F1 없이는 2023 검증 점수가 완전히 붕괴(XGBoost 0.00, CatBoost 3.88)
 채우던 버그 발견 — "평가 데이터 독립 예측 원칙" 위반 소지. `fillna(trackman_history.csv
 유래 고정값)`으로 수정, 커밋 완료(`13dfebf`). 실제 영향 조사 결과:
 - 트랙맨 물리량 12개: season이 조인 키라 실제 채점(미래 시즌)에서 구조적으로 100% 매칭
-  실패 → mean 자체가 NaN → fillna 사실상 no-op → 실질 영향 0 (수학적으로 확정).
+  실패. **정정(2026-08-16)**: 이전에 "mean 자체가 NaN → fillna no-op → 실질 영향 0"이라고
+  적었던 건 부정확함 — 실제 코드(`submit/script.py:83`)는 `tm_final`(trackman_history.csv만
+  으로 만든 집계표, test.csv와 무관)의 평균으로 채우기 때문에 이 값은 NaN이 아니라 **"역대
+  평균 트랙맨 수치"라는 고정 상수**가 2025년 모든 행에 동일하게 들어감. 규칙 준수는 맞지만
+  (test 유래 통계 아님) "영향 0"은 틀림 — 트리 분기는 여러 피처를 같이 보기 때문에, 이
+  값이 모든 행에서 동일해도 다른 피처(볼카운트 등)와 결합된 분기 경로 자체는 여전히
+  작동함. 955 vs 968.15(+13) 차이가 이 상수 유입 효과인지, 전체 재학습 노이즈(MLP
+  7-seed 고분산, 피처 구성 변화로 인한 CatBoost 분기 후보 변화)인지는 미확정.
 - 구종비중 4개: train.csv 147만 행 전수조사 결과 결측 0건 → 실질 영향 0에 가까움.
 
 상세 규칙은 `CLAUDE.md` 참고.
@@ -192,20 +250,100 @@ F1 없이는 2023 검증 점수가 완전히 붕괴(XGBoost 0.00, CatBoost 3.88)
 2. ~~CatBoost+MLP+XGBoost 3-way 블렌드 시도~~ 완료, 효과 없음 확인 (XGBoost 비중 0%, CatBoost-XGBoost 상관계수 0.96로 너무 높음)
 3. ~~`full_retrain_blend_f1.py`로 전체 재학습 → 재제출~~ **완료, 리더보드 968.15 확인 (2026-08-14)**
 4. ~~트랙맨 물리량 제외 버전 실전 검증~~ **완료, 955로 968.15보다 낮음 확인 (2026-08-16) — 종결, `submit_final.zip` 유지**
-5. **MLP 히든레이어/dropout/lr/weight_decay/batch_size Optuna 재튜닝 — 진행 중 (2026-08-16 시작)**.
-   `tune_mlp_pitchmix_f1.py`, 구종비중+F1 반영 후 2023+2024 이중검증, 단일시드 프록시로
-   트라이얼당 ~5분. SQLite storage(`model_py311/mlp_tune_study.db`)로 중단/재개 가능
-   (`load_if_exists=True`). 목표 20+trial, 세션 중 한 번 중단 후 재개함(7trial 완료 시점).
-   완료되면 best params로 7-seed 앙상블 재검증 필요.
-6. **블렌드 alpha(CatBoost/MLP 비율) 2023+2024 이중검증으로 재확인 — 코드 작성 완료, 실행
-   대기 중.** 기존 alpha=0.61은 `experiment_final_blend_f1.py`가 season==2024 단일
-   홀드아웃으로만 정한 값이라, 우리가 이미 "단일시즌 불신뢰" 결론(§3-1)을 낸 것과 모순됨.
-   `experiment_final_blend_f1_dual.py` 작성 완료 — MLP 튜닝과 GPU(MPS)를 동시에 쓰면
-   느려지므로 튜닝 완료 후 실행 예정.
-7. MLP 수치형 피처 전처리를 `StandardScaler` → `QuantileTransformer`로 교체 시도 (2번 노트
-   근거, 아직 코드 작업 안 함).
-8. MLP 전용 신규 피처: `asof_batter_*` 확장, 결측치 표시 플래그
-9. XGBoost 재튜닝 재시도 (트라이얼 수 늘려서, 55개 근처로) — 15trial로는 오히려 손해였음(786.98 < 790.90)
+5. ~~MLP 히든레이어/dropout/lr/weight_decay/batch_size Optuna 재튜닝~~ **완료(부분), 2026-08-16.**
+   `tune_mlp_pitchmix_f1.py`, 구종비중+F1 반영 후 2023+2024 이중검증, 단일시드 프록시. SQLite
+   storage(`model_py311/mlp_tune_study.db`)로 세션 중 두 번 중단/재개(7trial, 이후 다시 중단).
+   **최종 24trial(0~23)에서 중단** — trial 016이 최고(676.05, 단일시드 기준):
+   `hidden1=128, hidden2=96, dropout=0.426, lr=0.00426, weight_decay=0.00776, batch_size=1024`.
+   중단 이후 트라이얼들(017~023)이 이 값을 못 넘어서(674.34가 최근접) 수확체감 판단, 중단.
+   **`mlp_model.py`의 기본 하이퍼파라미터(HIDDEN1/HIDDEN2/DROPOUT/LR/WEIGHT_DECAY/BATCH_SIZE)에
+   이 값을 반영 완료** (기존: 128/64/0.3/0.003/0.01/4096). `model_py311/best_mlp_pitchmix_f1_hparams.json`에도
+   저장. **주의: 아직 단일시드 프록시로만 확인됨 — 7-seed 앙상블 재검증 필요(다음 단계).**
+   추가 trial(더 촘촘히)로 재개하는 것도 가능하나 지금은 보류.
+6. ~~7-seed 앙상블로 위 튜닝 결과 재검증~~ **완료, 2026-08-16 (`experiment_mlp_7seed_final.py`).**
+   튜닝된 하이퍼파라미터 + quantile PLE + same_hand 다 합친 최종 MLP 레시피로 2023+2024
+   7-seed 앙상블 실행:
+
+   | 시즌 | 점수 |
+   |---|---|
+   | 2023 | 602.30 |
+   | 2024 | 892.95 |
+   | **2023+2024 평균** | **747.62** |
+
+   세션 시작 전 기준값(806.69, season==2024만·구종비중+F1만)과 **같은 2024 기준으로 비교하면
+   892.95로 +86.26** — 오늘 한 개선들이 노이즈가 아니라 실제 효과였음을 확인. 참고로 기존
+   최고 CatBoost+MLP 블렌드(837.48~847.44, season==2024)보다 이미 MLP 단독이 더 높음.
+7. ~~블렌드 alpha(CatBoost/MLP 비율) 2023+2024 이중검증으로 재확인~~ **완료, 2026-08-16.**
+   기존 alpha=0.61은 season==2024 단일 홀드아웃으로만 정한 값이었음. same_hand 제외 +
+   quantile PLE 반영한 최종 레시피로 재검증(`experiment_final_blend_f1_dual.py`):
+
+   | 시즌 | CatBoost | MLP(7-seed) | 시즌 단독 최적 alpha | 블렌드 |
+   |---|---|---|---|---|
+   | 2023 | 619.70 | 610.91 | 0.55 | 636.09 |
+   | 2024 | 806.77 | 890.13 | 0.19 | 895.25 |
+
+   **2023+2024 평균 기준 최적 alpha = 0.33** (평균 score=762.36) — 기존 0.61에서 크게
+   하향. MLP가 오늘 크게 좋아지면서(특히 2024에서 CatBoost를 역전, 890.13 > 806.77)
+   블렌드 비중도 MLP 쪽으로 크게 쏠림. `full_retrain_blend_f1.py`의 `BLEND_ALPHA` 갱신 완료.
+8. ~~MLP 수치형 피처 전처리를 `StandardScaler` → Quantile PLE로 교체~~ **완료, 2026-08-16.**
+   단순 sklearn `QuantileTransformer`가 아니라 Gorishniy et al.의 piecewise-linear 인코딩
+   (n_bins=24, d_embed=8, 창현님 쪽 실전 리더보드 957.80/+55.78로 검증됨). 우리 레시피
+   (구종비중+F1)로 2023+2024 단일시드 검증(`experiment_quantile_embed.py`):
+
+   | 시즌 | StandardScaler | Quantile PLE | Δ |
+   |---|---|---|---|
+   | 2023 | 518.24 | 549.43 | +31.19 |
+   | 2024 | 777.08 | 786.88 | +9.80 |
+   | **평균** | 647.66 | 668.16 | **+20.50** |
+
+   두 시즌 다 개선 — 채택. `mlp_model.py`에 `QuantileEmbedding`/`fit_quantile_edges` 이식
+   완료(하위 호환 유지, `bin_edges=None`이면 기존 방식)하고, **실제 프로덕션 학습 경로
+   (`full_retrain_blend_f1.py`)와 추론 경로(`submit/script.py`)에도 연결 완료** — 다음
+   전체 재학습부터 자동 적용됨. 7-seed 앙상블로는 아직 재검증 안 함(단일시드 결과).
+9. MLP 전용 신규 피처: `asof_batter_*` 확장, 결측치 표시 플래그
+10. XGBoost 재튜닝 재시도 (트라이얼 수 늘려서, 55개 근처로) — 15trial로는 오히려 손해였음(786.98 < 790.90)
+11. **메타모델(로지스틱회귀) 스태킹 블렌드** (창현님 저장소, alpha 가중평균 대비 +14.22
+    검증됨) — 입력은 CatBoost/MLP 확률 예측값 2개뿐. **주의**: 검증셋 전체로 메타모델을
+    학습하면 인샘플 평가가 됨(월 단위로 학습/검증 분리 필요), 여러 시즌 OOF 스태킹은 F1
+    필터와 구조적으로 충돌해서 실패했다는 전례 있음(-197.92). 아직 코드 작업 안 함.
+12. **트랙맨 매칭 컬럼에서 `season` 빼고 9개로 — 테스트 설계 오류로 재검증 필요 (2026-08-16).**
+    원작자 노트를 다시 보면 "**2025년 실제 대회제출시에만** 9개로 매칭해야함"이라고 콕 집어
+    말한 것 — 즉 **학습은 season 포함 10개로 그대로 두고, 실제 2025 test 추론 시에만
+    (season 매칭 실패에 대한 fallback으로) 9개 버전을 쓰라**는 의도였음.
+
+    근데 처음 돌린 검증(`experiment_trackman_no_season.py` / `_catboost.py`)은 **학습·검증
+    둘 다** 9개로 바꿔서 비교한 것이라 의도와 다른 테스트였음 — 그 결과(CatBoost 평균
+    680.89→633.02, -47.87, 2023/2024 둘 다 나쁨)는 "모델이 애초에 뭉개진 정보로 학습하면
+    손해"라는 걸 보여줄 뿐, 실제 제안(학습은 그대로, fallback만 교체)과는 무관.
+
+    **진짜 의도한 수정은 로컬 검증이 거의 불가능함** — 2023/2024는 trackman_history
+    범위(2019~2024) 안이라 season 매칭이 로컬에선 항상 성공하고 fallback이 거의 안 쓰임.
+    트랙맨 물리량 전체 제외 실험(955, 위 섹션)과 똑같은 구조적 한계 — **실제 제출로만
+    검증 가능**. 시도하려면: `process_trackman_features_safe`는 그대로(season 포함) 두고,
+    `submit/script.py::process_trackman_features()`의 fallback(`fill_values`) 계산만
+    season 제외 버전으로 바꿔서 실전 제출 테스트.
+13. **트랙맨 물리량 조인의 시즌 필터 불일치 발견 (2026-08-16, 사용자 지적).** 구종비중은
+    `compute_coarse_pitchmix(df[df["season"] < val_season], ...)`처럼 검증 시즌 이전
+    데이터만 넘기는데, 트랙맨 물리량은 `process_trackman_features_safe(df, ...)`처럼
+    **전체 df를 그대로 넘김**(`experiment_pitchmix_f1_combined.py` 등 여러 스크립트에서
+    동일 패턴). season이 매칭 키라 완전한 미래 리크는 아니지만(2023 검증 행은 어차피
+    season==2023 트랙맨하고만 매칭됨), "이전 시즌만" 원칙이 구종비중과 안 맞고 일관성이
+    없음. 로컬 검증 숫자가 이 때문에 미세하게 낙관적일 가능성 있음 — `process_trackman_features_safe`
+    호출부에도 `df[df["season"] < val_season]`를 넘기도록 통일 필요 (영향 크기는 미확인,
+    재검증 필요).
+14. **트랙맨 물리량 "전년도 조인"으로 재시도 (2026-08-16, 팀원 노트에서 확인).**
+    지금까지 "트랙맨 물리량 12개는 season을 조인 키로 써서 실제 채점 시즌(미래)엔 구조적으로
+    100% 매칭 실패한다"고 결론 내고 포기했던 것(§ 트랙맨 물리량 12개 섹션)의 근본 해법일 수
+    있음. 핵심 아이디어: **같은 시즌이 아니라 "1년 전" 트랙맨 데이터로 조인** — 이러면
+    `2025 test ← 2024 Trackman`처럼 항상 매칭 가능(트랙맨은 2019~2024 존재, 2019 train만
+    전년도 트랙맨이 없어서 예외). 팀원은 상황 매칭 컬럼 개수를 9개→6개로 줄여서
+    매칭률(68.8%→83.9%)과 그룹당 표본수(6.3개→653개)를 동시에 개선(핵심 6개:
+    `inning, top_bottom, balls_before, strikes_before, pitcher_hand, batter_hand`).
+    매칭된 투구들의 **평균**(구속/회전수/무브먼트 등)은 기각됐고, **표준편차**(그 상황에서
+    투수 매커니즘이 얼마나 들쭉날쭉했는지)만 채택됨 — 우리 `process_trackman_features_safe`도
+    mean+std를 이미 계산하고 있지만 season 조인이라 실전에서 죽어있었던 것과 대조적.
+    시도할 것: match_cols를 핵심 6개로 좁히고 season 대신 `season-1`로 조인하는 버전을
+    만들어서 2023+2024 이중검증 → 도움되면 std 피처만 우선 채택.
 
 ## 관련 파일
 
@@ -216,8 +354,12 @@ F1 없이는 2023 검증 점수가 완전히 붕괴(XGBoost 0.00, CatBoost 3.88)
 - `experiment_final_blend_f1.py`: CatBoost+MLP 블렌드 + F1 (season==2024 단일 홀드아웃, alpha=0.61 산출 — 재검증 필요, §6-6 참고)
 - `experiment_final_blend_f1_dual.py`: 위와 동일하되 2023+2024 이중검증으로 alpha 재확인 (작성 완료, 실행 대기)
 - `experiment_no_trackman_pitchmix_f1.py`: 트랙맨 물리량 제외 버전 2023+2024 검증
-- `tune_mlp_pitchmix_f1.py`: MLP 하이퍼파라미터 Optuna 재튜닝 (SQLite storage로 재개 가능)
+- `tune_mlp_pitchmix_f1.py`: MLP 하이퍼파라미터 Optuna 재튜닝 (SQLite storage로 재개 가능, 24trial에서 중단)
+- `experiment_same_hand.py` / `_catboost.py` / `_mlp.py`: same_hand/same_hand_advantage 피처 검증 (XGBoost +14.85, CatBoost -16.26, MLP +47.90 — 모델별로 다름, CatBoost만 제외하고 채택)
+- `experiment_mlp_7seed_final.py`: MLP 최종 레시피(튜닝+quantile+same_hand) 7-seed 앙상블 검증 (2023+2024 평균 747.62)
+- `experiment_quantile_embed.py`: MLP quantile PLE 임베딩 vs StandardScaler 비교 (2023+2024, 단일시드)
 - `full_retrain_blend.py` / `_f1.py` / `_f1_notrackman.py`: 실제 제출용 전체 재학습 (F1 미적용/적용/트랙맨 제외)
-- `mlp_model.py`: MLP 모델/전처리 유틸 (원래 임시 세션 경로에 있던 걸 저장소로 이전)
+- `mlp_model.py`: MLP 모델/전처리 유틸. 하이퍼파라미터는 2026-08-16 Optuna 튜닝 결과로 갱신됨,
+  quantile PLE 임베딩(`QuantileEmbedding`/`fit_quantile_edges`, `bin_edges=None`시 하위 호환) 이식됨
 - `submit/script.py`, `submit_notrackman/script.py`: 실제 제출 추론 코드
 - `CLAUDE.md`: 대회 규칙 + 컴플라이언스 사고 기록

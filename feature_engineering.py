@@ -5,8 +5,15 @@ import numpy as np
 import pandas as pd
 
 
-def process_trackman_features_safe(df_main, df_trm, is_train_split=True):
-    """타임 리크가 차단된 10-Key 상황 지문 기반 트랙맨 전처리 결합 엔진"""
+def process_trackman_features_safe(df_main, df_trm, is_train_split=True, drop_season=False):
+    """타임 리크가 차단된 10-Key(또는 9-Key) 상황 지문 기반 트랙맨 전처리 결합 엔진.
+
+    `drop_season=True`면 매칭 기준 컬럼에서 `season`을 빼서 9개로 매칭한다. season을
+    포함(기본값, 10개)하면 "같은 시즌" 트랙맨만 매칭되는데, 실제 채점 시즌(2025)은
+    trackman_history.csv(2019~2024) 범위 밖이라 구조적으로 100% 매칭 실패한다.
+    season을 빼면 "몇 년도든 상황만 같으면" 매칭되므로 2025 추론에서도 정상 작동한다
+    (원작자 노트: "[수정 0813] 2025년 실제 대회제출시에는 9개 피쳐로 매칭해야함").
+    """
     df_main_copy = df_main.copy()
     df_trm_copy = df_trm.copy()
 
@@ -19,6 +26,8 @@ def process_trackman_features_safe(df_main, df_trm, is_train_split=True):
         print(f"⏳ [Time Filter] {max_season}년 {max_month}월 이전의 트랙맨 데이터만 잘라내어 피처를 산출합니다.")
 
     match_cols = [dfc for dfc in df_main_copy.columns if (dfc in df_trm_copy.columns) and dfc != 'row_id']
+    if drop_season and 'season' in match_cols:
+        match_cols = [c for c in match_cols if c != 'season']
 
     grouped = df_trm_copy.groupby(match_cols + ['pitch_type_group', 'auto_pitch_type'])
     grouped_phase1 = grouped[['rel_speed', 'spin_rate', 'induced_vert_break', 'horz_break', 'extension', 'rel_height', 'rel_side', 'zone_speed']].agg(['mean', 'std'])
@@ -77,6 +86,9 @@ def add_engineered_features(df, league_success_mean):
 
     pressure_signal = df['li'] * ((df['strikes_before'] >= 2) | (df['balls_before'] >= 3)).astype(np.int64)
     df['count_pressure'] = df['pitcher_relative_success'] * pressure_signal
+
+    df['same_hand'] = (df['pitcher_hand'] == df['batter_hand']).astype(np.int64)
+    df['same_hand_advantage'] = df['pitcher_relative_success'] * df['same_hand']
 
     return df
 

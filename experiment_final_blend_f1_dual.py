@@ -19,8 +19,12 @@ from catboost import CatBoostClassifier, Pool
 
 from mlp_model import (
     CAT_COLS, ENSEMBLE_SEEDS, fit_preprocessing, apply_preprocessing, to_tensors,
-    train_ensemble, predict_ensemble, embed_dim_for_cardinality,
+    train_ensemble, predict_ensemble, embed_dim_for_cardinality, fit_quantile_edges,
 )
+
+# same_hand/same_hand_advantage: CatBoost엔 손해(-16.26), XGBoost/MLP엔 도움(2026-08-16 확인)
+# -> CatBoost 피처셋에서만 제외.
+CATBOOST_EXCLUDE_COLS = ["same_hand", "same_hand_advantage"]
 
 from feature_engineering import process_trackman_features_safe, add_engineered_features
 from experiment_pitchmix_coarse import compute_coarse_pitchmix, COARSE_COLS
@@ -81,8 +85,8 @@ def run_one_season(val_season):
 
     y_val = train_df.loc[val_mask, TARGET].values
 
-    # --- CatBoost ---
-    drop_cols = ["row_id", TARGET]
+    # --- CatBoost --- (same_hand 계열 제외)
+    drop_cols = ["row_id", TARGET] + CATBOOST_EXCLUDE_COLS
     features = [c for c in train_df.columns if c not in drop_cols]
     categorical_features = [c for c in tr_final.select_dtypes(include="object").columns if c != "row_id" and c in features]
     cb_df = train_df.copy()
@@ -115,12 +119,16 @@ def run_one_season(val_season):
     X_tr_cat, X_tr_num, y_tr = to_tensors(train_proc, CAT_COLS, num_cols, TARGET)
     X_val_cat, X_val_num, y_val_t = to_tensors(val_proc, CAT_COLS, num_cols, TARGET)
     embed_dims = [embed_dim_for_cardinality(d) for d in cat_dims]
+    bin_edges = fit_quantile_edges(X_tr_num)
     members = train_ensemble(
         X_tr_cat, X_tr_num, y_tr, cat_dims=cat_dims, num_numeric_feats=len(num_cols),
         X_val_cat=X_val_cat, X_val_num=X_val_num, y_val=y_val_t, embed_dims=embed_dims,
-        seeds=ENSEMBLE_SEEDS, device=DEVICE, verbose=False,
+        seeds=ENSEMBLE_SEEDS, device=DEVICE, verbose=False, bin_edges=bin_edges,
     )
-    mlp_pred = predict_ensemble(members, cat_dims, len(num_cols), embed_dims, X_val_cat, X_val_num, device=DEVICE)
+    mlp_pred = predict_ensemble(
+        members, cat_dims, len(num_cols), embed_dims, X_val_cat, X_val_num, device=DEVICE,
+        bin_edges=bin_edges,
+    )
     _, mlp_bss = compute_bss(mlp_pred, y_val)
     mlp_score = max(0, 100000 * mlp_bss)
     print(f"[{val_season}] MLP(7-seed): score={mlp_score:.2f} ({time.time()-t0:.1f}s)", flush=True)
