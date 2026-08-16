@@ -62,7 +62,8 @@ def embed_dim_for_cardinality(cardinality):
 
 
 class TabularMLP(nn.Module):
-    def __init__(self, num_numeric_feats, cat_dims, embed_dims=None):
+    def __init__(self, num_numeric_feats, cat_dims, embed_dims=None,
+                 hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT):
         super().__init__()
         if embed_dims is None:
             embed_dims = [embed_dim_for_cardinality(d) for d in cat_dims]
@@ -73,14 +74,14 @@ class TabularMLP(nn.Module):
         total_input_dim = sum(self.embed_dims) + num_numeric_feats
 
         self.mlp = nn.Sequential(
-            nn.Linear(total_input_dim, HIDDEN1),
-            nn.BatchNorm1d(HIDDEN1),
+            nn.Linear(total_input_dim, hidden1),
+            nn.BatchNorm1d(hidden1),
             nn.ReLU(),
-            nn.Dropout(DROPOUT),
-            nn.Linear(HIDDEN1, HIDDEN2),
-            nn.BatchNorm1d(HIDDEN2),
+            nn.Dropout(dropout),
+            nn.Linear(hidden1, hidden2),
+            nn.BatchNorm1d(hidden2),
             nn.ReLU(),
-            nn.Linear(HIDDEN2, 1),
+            nn.Linear(hidden2, 1),
         )
         self.sigmoid = nn.Sigmoid()
 
@@ -148,6 +149,7 @@ def train_mlp(
     embed_dims=None, max_epochs=MAX_EPOCHS, patience=PATIENCE,
     batch_size=BATCH_SIZE, lr=LR, weight_decay=WEIGHT_DECAY,
     device=None, verbose=True, seed=SEED,
+    hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT,
 ):
     """TabularMLP를 학습합니다.
 
@@ -158,7 +160,10 @@ def train_mlp(
     """
     torch.manual_seed(seed)
     device = device or get_device()
-    model = TabularMLP(num_numeric_feats=num_numeric_feats, cat_dims=cat_dims, embed_dims=embed_dims).to(device)
+    model = TabularMLP(
+        num_numeric_feats=num_numeric_feats, cat_dims=cat_dims, embed_dims=embed_dims,
+        hidden1=hidden1, hidden2=hidden2, dropout=dropout,
+    ).to(device)
     criterion = nn.BCELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -223,6 +228,7 @@ def train_ensemble(
     seeds=ENSEMBLE_SEEDS, embed_dims=None,
     max_epochs=MAX_EPOCHS, patience=PATIENCE, batch_size=BATCH_SIZE,
     lr=LR, weight_decay=WEIGHT_DECAY, device=None, verbose=True,
+    hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT,
 ):
     """서로 다른 시드로 TabularMLP를 여러 개 학습해 멤버 리스트를 반환합니다.
 
@@ -239,6 +245,7 @@ def train_ensemble(
             embed_dims=embed_dims, max_epochs=max_epochs, patience=patience,
             batch_size=batch_size, lr=lr, weight_decay=weight_decay,
             device=device, verbose=verbose, seed=seed,
+            hidden1=hidden1, hidden2=hidden2, dropout=dropout,
         )
         members.append({
             "state_dict": {k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
@@ -250,20 +257,25 @@ def train_ensemble(
     return members
 
 
-def predict_ensemble(members, cat_dims, num_numeric_feats, embed_dims, X_cat, X_num, device=None):
+def predict_ensemble(members, cat_dims, num_numeric_feats, embed_dims, X_cat, X_num, device=None,
+                      hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT):
     """멤버별 예측 확률을 평균해 앙상블 예측을 반환합니다."""
     device = device or get_device()
     preds_list = []
     with torch.no_grad():
         for member in members:
-            model = TabularMLP(num_numeric_feats=num_numeric_feats, cat_dims=cat_dims, embed_dims=embed_dims).to(device)
+            model = TabularMLP(
+                num_numeric_feats=num_numeric_feats, cat_dims=cat_dims, embed_dims=embed_dims,
+                hidden1=hidden1, hidden2=hidden2, dropout=dropout,
+            ).to(device)
             model.load_state_dict(member["state_dict"])
             model.eval()
             preds_list.append(model(X_cat.to(device), X_num.to(device)).cpu().numpy())
     return np.mean(preds_list, axis=0)
 
 
-def make_bundle(members, cat_cols, num_cols, cat_dims, embed_dims, cat_encoder, num_imputer, num_scaler):
+def make_bundle(members, cat_cols, num_cols, cat_dims, embed_dims, cat_encoder, num_imputer, num_scaler,
+                 hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT):
     """pickle로 저장 가능한 순수 dict 형태의 앙상블 모델 번들을 만듭니다.
 
     ("members" 키의 존재로 구버전 단일-모델 번들("state_dict" 키만 있음)과 구분합니다.)
@@ -279,6 +291,9 @@ def make_bundle(members, cat_cols, num_cols, cat_dims, embed_dims, cat_encoder, 
         "num_imputer": num_imputer,
         "num_scaler": num_scaler,
         "best_epoch_": avg_best_epoch,
+        "hidden1": hidden1,
+        "hidden2": hidden2,
+        "dropout": dropout,
     }
 
 
@@ -292,4 +307,6 @@ def predict_bundle(bundle, df, device=None):
     return predict_ensemble(
         bundle["members"], bundle["cat_dims"], len(bundle["num_cols"]), bundle["embed_dims"],
         X_cat, X_num, device=device,
+        hidden1=bundle.get("hidden1", HIDDEN1), hidden2=bundle.get("hidden2", HIDDEN2),
+        dropout=bundle.get("dropout", DROPOUT),
     )
