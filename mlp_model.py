@@ -10,8 +10,6 @@ submit.zip에는 `code/` 패키지가 포함되지 않으므로, pickle이 프�
 의존하면 대회 서버에서 unpickle이 실패합니다. dict + torch 텐서 + sklearn
 전처리기 조합은 별도 클래스 정의 없이도 어디서나 unpickle이 가능합니다.
 """
-import math
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -38,15 +36,12 @@ CAT_COLS = [
 
 MAX_EMBED_DIM = 50
 MIN_EMBED_DIM = 4
-# Optuna 재튜닝 결과(2026-08-16, tune_mlp_pitchmix_f1.py, 구종비중+F1 반영 후 2023+2024
-# 이중검증, 27trial 중 trial 016 best). 단일시드 프록시 기준 값이라 7-seed 앙상블로
-# 재검증 전까지는 잠정치. model_py311/best_mlp_pitchmix_f1_hparams.json 참고.
 HIDDEN1 = 128
-HIDDEN2 = 96
-DROPOUT = 0.4259134876019591
-LR = 0.004256541133797278
-WEIGHT_DECAY = 0.007764092438820441
-BATCH_SIZE = 1024
+HIDDEN2 = 64
+DROPOUT = 0.3
+LR = 0.003
+WEIGHT_DECAY = 0.01
+BATCH_SIZE = 4096
 MAX_EPOCHS = 60
 PATIENCE = 7
 SEED = 42
@@ -60,73 +55,14 @@ SEED = 42
 # 7개로 확정했습니다.
 ENSEMBLE_SEEDS = [42, 123, 7, 2024, 99, 555, 31337]
 
-# 수치형 피처를 표준화만 해서 그대로 concat하는 대신, Gorishniy et al.의 quantile 기반
-# piecewise-linear 인코딩(PLE, Q-LR)으로 감싼 뒤 concat합니다. n_bins=24, d=8은 팀원(창현님)
-# 저장소(lgaimers9-ensemble-v1)의 그리드 스윕(4/8/12/16/24/32, 7-seed paired 비교)에서
-# n_bins=24가 delta(+55.78)·승률(7/7)·std(23.49) 세 지표 모두 최적이라 채택했다는 값을 이식.
-QUANTILE_N_BINS = 24
-QUANTILE_D = 8
-
 
 def embed_dim_for_cardinality(cardinality):
     """fastai 스타일 임베딩 크기 휴리스틱: min(50, (card+1)//2), 하한 4."""
     return max(MIN_EMBED_DIM, min(MAX_EMBED_DIM, (cardinality + 1) // 2))
 
 
-def fit_quantile_edges(X_num, n_bins=QUANTILE_N_BINS):
-    """(N, num_numeric) 학습 텐서/배열에서 피처별 quantile 경계 (num_numeric, n_bins+1)를 계산합니다.
-    반드시 학습 split에서만 계산해야 합니다(리크 방지, fit_preprocessing과 동일한 컨벤션).
-    중복 경계(카디널리티가 낮은 피처)는 단조 증가를 보장하도록 아주 작은 epsilon으로 밀어냅니다."""
-    X_np = X_num.numpy() if torch.is_tensor(X_num) else np.asarray(X_num)
-    qs = np.linspace(0.0, 1.0, n_bins + 1)
-    edges = np.quantile(X_np, qs, axis=0).T  # (num_numeric, n_bins+1)
-    edges = np.maximum.accumulate(edges, axis=1)
-    for i in range(1, edges.shape[1]):
-        tie = edges[:, i] <= edges[:, i - 1]
-        edges[tie, i] = edges[tie, i - 1] + 1e-6
-    return torch.tensor(edges, dtype=torch.float32)
-
-
-class QuantileEmbedding(nn.Module):
-    """수치형 피처별 quantile 기반 piecewise-linear 인코딩(PLE) + 피처별 독립 Linear + ReLU
-    (Gorishniy et al., "On Embeddings for Numerical Features in Tabular Deep Learning")."""
-
-    def __init__(self, bin_edges, d_embed=QUANTILE_D, use_relu=True):
-        super().__init__()
-        self.register_buffer("edges", bin_edges)  # (num_numeric, n_bins+1), 학습 안 함
-        num_numeric, n_bins_plus1 = bin_edges.shape
-        n_bins = n_bins_plus1 - 1
-        self.num_numeric = num_numeric
-        self.n_bins = n_bins
-        self.use_relu = use_relu
-        self.weight = nn.Parameter(torch.empty(num_numeric, n_bins, d_embed))
-        self.bias = nn.Parameter(torch.zeros(num_numeric, d_embed))
-        bound = 1.0 / math.sqrt(n_bins)
-        nn.init.uniform_(self.weight, -bound, bound)
-
-    def encode(self, x_num):
-        left = self.edges[:, :-1].unsqueeze(0)   # (1, num_numeric, n_bins)
-        right = self.edges[:, 1:].unsqueeze(0)    # (1, num_numeric, n_bins)
-        x = x_num.unsqueeze(-1)                   # (batch, num_numeric, 1)
-        width = (right - left).clamp_min(1e-6)
-        frac = (x - left) / width
-        return frac.clamp(0.0, 1.0)                # (batch, num_numeric, n_bins)
-
-    def forward(self, x_num):
-        p = self.encode(x_num)
-        e = torch.einsum("bnf,nfd->bnd", p, self.weight) + self.bias
-        if self.use_relu:
-            e = torch.relu(e)
-        return e.reshape(e.shape[0], -1)
-
-
 class TabularMLP(nn.Module):
-    def __init__(self, num_numeric_feats=None, cat_dims=None, embed_dims=None,
-                 hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT,
-                 bin_edges=None, quantile_d=QUANTILE_D):
-        """`bin_edges`가 주어지면 수치형 입력을 QuantileEmbedding(PLE)으로 인코딩하고,
-        `bin_edges=None`이면 예전처럼 표준화된 수치형을 그대로 concat합니다(하위 호환,
-        `num_numeric_feats` 필요)."""
+    def __init__(self, num_numeric_feats, cat_dims, embed_dims=None):
         super().__init__()
         if embed_dims is None:
             embed_dims = [embed_dim_for_cardinality(d) for d in cat_dims]
@@ -134,32 +70,24 @@ class TabularMLP(nn.Module):
         self.embeddings = nn.ModuleList([
             nn.Embedding(num_embeddings=dim + 2, embedding_dim=edim) for dim, edim in zip(cat_dims, self.embed_dims)
         ])
-
-        if bin_edges is not None:
-            self.quantile = QuantileEmbedding(bin_edges, d_embed=quantile_d)
-            numeric_out_dim = bin_edges.shape[0] * quantile_d
-        else:
-            self.quantile = None
-            numeric_out_dim = num_numeric_feats
-        total_input_dim = sum(self.embed_dims) + numeric_out_dim
+        total_input_dim = sum(self.embed_dims) + num_numeric_feats
 
         self.mlp = nn.Sequential(
-            nn.Linear(total_input_dim, hidden1),
-            nn.BatchNorm1d(hidden1),
+            nn.Linear(total_input_dim, HIDDEN1),
+            nn.BatchNorm1d(HIDDEN1),
             nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden1, hidden2),
-            nn.BatchNorm1d(hidden2),
+            nn.Dropout(DROPOUT),
+            nn.Linear(HIDDEN1, HIDDEN2),
+            nn.BatchNorm1d(HIDDEN2),
             nn.ReLU(),
-            nn.Linear(hidden2, 1),
+            nn.Linear(HIDDEN2, 1),
         )
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x_cat, x_num):
         embeds = [emb(x_cat[:, i].long()) for i, emb in enumerate(self.embeddings)]
         x_embed = torch.cat(embeds, dim=1)
-        x_num_enc = self.quantile(x_num) if self.quantile is not None else x_num
-        x_all = torch.cat([x_embed, x_num_enc], dim=1)
+        x_all = torch.cat([x_embed, x_num], dim=1)
         return self.sigmoid(self.mlp(x_all)).squeeze(-1)
 
 
@@ -215,19 +143,13 @@ def compute_bss(preds, y):
 
 
 def train_mlp(
-    X_tr_cat, X_tr_num, y_tr, cat_dims, num_numeric_feats=None,
+    X_tr_cat, X_tr_num, y_tr, cat_dims, num_numeric_feats,
     X_val_cat=None, X_val_num=None, y_val=None,
     embed_dims=None, max_epochs=MAX_EPOCHS, patience=PATIENCE,
     batch_size=BATCH_SIZE, lr=LR, weight_decay=WEIGHT_DECAY,
     device=None, verbose=True, seed=SEED,
-    hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT,
-    bin_edges=None, quantile_d=QUANTILE_D,
 ):
     """TabularMLP를 학습합니다.
-
-    `bin_edges`가 주어지면 수치형 입력을 QuantileEmbedding(PLE)으로 인코딩합니다.
-    `bin_edges=None`이면 `num_numeric_feats`를 이용해 예전처럼 표준화된 수치형을
-    그대로 concat합니다(하위 호환).
 
     검증 텐서(X_val_*)가 주어지면 Val Brier 기준 early stopping을 수행하고,
     best epoch의 가중치로 복원해 (model, best_epoch)을 반환합니다.
@@ -236,11 +158,7 @@ def train_mlp(
     """
     torch.manual_seed(seed)
     device = device or get_device()
-    model = TabularMLP(
-        num_numeric_feats=num_numeric_feats, cat_dims=cat_dims, embed_dims=embed_dims,
-        hidden1=hidden1, hidden2=hidden2, dropout=dropout,
-        bin_edges=bin_edges, quantile_d=quantile_d,
-    ).to(device)
+    model = TabularMLP(num_numeric_feats=num_numeric_feats, cat_dims=cat_dims, embed_dims=embed_dims).to(device)
     criterion = nn.BCELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -300,13 +218,11 @@ def train_mlp(
 
 
 def train_ensemble(
-    X_tr_cat, X_tr_num, y_tr, cat_dims, num_numeric_feats=None,
+    X_tr_cat, X_tr_num, y_tr, cat_dims, num_numeric_feats,
     X_val_cat=None, X_val_num=None, y_val=None,
     seeds=ENSEMBLE_SEEDS, embed_dims=None,
     max_epochs=MAX_EPOCHS, patience=PATIENCE, batch_size=BATCH_SIZE,
     lr=LR, weight_decay=WEIGHT_DECAY, device=None, verbose=True,
-    hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT,
-    bin_edges=None, quantile_d=QUANTILE_D,
 ):
     """서로 다른 시드로 TabularMLP를 여러 개 학습해 멤버 리스트를 반환합니다.
 
@@ -323,8 +239,6 @@ def train_ensemble(
             embed_dims=embed_dims, max_epochs=max_epochs, patience=patience,
             batch_size=batch_size, lr=lr, weight_decay=weight_decay,
             device=device, verbose=verbose, seed=seed,
-            hidden1=hidden1, hidden2=hidden2, dropout=dropout,
-            bin_edges=bin_edges, quantile_d=quantile_d,
         )
         members.append({
             "state_dict": {k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
@@ -336,37 +250,26 @@ def train_ensemble(
     return members
 
 
-def predict_ensemble(members, cat_dims, num_numeric_feats, embed_dims, X_cat, X_num, device=None,
-                      hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT,
-                      bin_edges=None, quantile_d=QUANTILE_D):
+def predict_ensemble(members, cat_dims, num_numeric_feats, embed_dims, X_cat, X_num, device=None):
     """멤버별 예측 확률을 평균해 앙상블 예측을 반환합니다."""
     device = device or get_device()
     preds_list = []
     with torch.no_grad():
         for member in members:
-            model = TabularMLP(
-                num_numeric_feats=num_numeric_feats, cat_dims=cat_dims, embed_dims=embed_dims,
-                hidden1=hidden1, hidden2=hidden2, dropout=dropout,
-                bin_edges=bin_edges, quantile_d=quantile_d,
-            ).to(device)
+            model = TabularMLP(num_numeric_feats=num_numeric_feats, cat_dims=cat_dims, embed_dims=embed_dims).to(device)
             model.load_state_dict(member["state_dict"])
             model.eval()
             preds_list.append(model(X_cat.to(device), X_num.to(device)).cpu().numpy())
     return np.mean(preds_list, axis=0)
 
 
-def make_bundle(members, cat_cols, num_cols, cat_dims, embed_dims, cat_encoder, num_imputer, num_scaler,
-                 hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT,
-                 bin_edges=None, quantile_d=QUANTILE_D):
+def make_bundle(members, cat_cols, num_cols, cat_dims, embed_dims, cat_encoder, num_imputer, num_scaler):
     """pickle로 저장 가능한 순수 dict 형태의 앙상블 모델 번들을 만듭니다.
 
     ("members" 키의 존재로 구버전 단일-모델 번들("state_dict" 키만 있음)과 구분합니다.)
-    `bin_edges`가 없으면(과거 raw-concat 번들과의 하위 호환) "bin_edges" 키를 아예 담지
-    않습니다 — `predict_bundle`이 `.get("bin_edges")`로 조회해 자동으로 raw-concat 경로로
-    빠지므로 구버전 번들도 그대로 로드/추론 가능합니다.
     """
     avg_best_epoch = int(round(np.mean([m["best_epoch"] for m in members]))) if members else 0
-    bundle = {
+    return {
         "members": members,
         "cat_cols": cat_cols,
         "num_cols": num_cols,
@@ -376,14 +279,7 @@ def make_bundle(members, cat_cols, num_cols, cat_dims, embed_dims, cat_encoder, 
         "num_imputer": num_imputer,
         "num_scaler": num_scaler,
         "best_epoch_": avg_best_epoch,
-        "hidden1": hidden1,
-        "hidden2": hidden2,
-        "dropout": dropout,
     }
-    if bin_edges is not None:
-        bundle["bin_edges"] = bin_edges
-        bundle["quantile_d"] = quantile_d
-    return bundle
 
 
 def predict_bundle(bundle, df, device=None):
@@ -396,7 +292,4 @@ def predict_bundle(bundle, df, device=None):
     return predict_ensemble(
         bundle["members"], bundle["cat_dims"], len(bundle["num_cols"]), bundle["embed_dims"],
         X_cat, X_num, device=device,
-        hidden1=bundle.get("hidden1", HIDDEN1), hidden2=bundle.get("hidden2", HIDDEN2),
-        dropout=bundle.get("dropout", DROPOUT),
-        bin_edges=bundle.get("bin_edges"), quantile_d=bundle.get("quantile_d", QUANTILE_D),
     )

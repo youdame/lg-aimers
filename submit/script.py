@@ -4,7 +4,6 @@
 
 모델: CatBoost(재튜닝+coarse 구종비중) + Tabular MLP(coarse 구종비중, 7-seed) 블렌드.
 """
-import math
 import os
 import pickle
 import numpy as np
@@ -21,59 +20,16 @@ CAT_COLS = [
 COARSE_COLS = ["balls_before", "strikes_before", "pitcher_hand", "batter_hand"]
 
 
-class QuantileEmbedding(nn.Module):
-    """mlp_model.py::QuantileEmbedding 와 동일 구조 (독립 실행을 위해 복제).
-    수치형 피처별 quantile 기반 piecewise-linear 인코딩(PLE) + 피처별 독립 Linear + ReLU."""
-
-    def __init__(self, bin_edges, d_embed=8, use_relu=True):
-        super().__init__()
-        self.register_buffer("edges", bin_edges)
-        num_numeric, n_bins_plus1 = bin_edges.shape
-        n_bins = n_bins_plus1 - 1
-        self.num_numeric = num_numeric
-        self.n_bins = n_bins
-        self.use_relu = use_relu
-        self.weight = nn.Parameter(torch.empty(num_numeric, n_bins, d_embed))
-        self.bias = nn.Parameter(torch.zeros(num_numeric, d_embed))
-        bound = 1.0 / math.sqrt(n_bins)
-        nn.init.uniform_(self.weight, -bound, bound)
-
-    def encode(self, x_num):
-        left = self.edges[:, :-1].unsqueeze(0)
-        right = self.edges[:, 1:].unsqueeze(0)
-        x = x_num.unsqueeze(-1)
-        width = (right - left).clamp_min(1e-6)
-        frac = (x - left) / width
-        return frac.clamp(0.0, 1.0)
-
-    def forward(self, x_num):
-        p = self.encode(x_num)
-        e = torch.einsum("bnf,nfd->bnd", p, self.weight) + self.bias
-        if self.use_relu:
-            e = torch.relu(e)
-        return e.reshape(e.shape[0], -1)
-
-
 class TabularMLP(nn.Module):
-    """mlp_model.py::TabularMLP 와 동일 구조 (독립 실행을 위해 복제).
+    """mlp_model.py::TabularMLP 와 동일 구조 (독립 실행을 위해 복제)."""
 
-    `bin_edges`가 주어지면 수치형 입력을 QuantileEmbedding(PLE)으로 인코딩하고,
-    `bin_edges=None`이면 예전처럼 표준화된 수치형을 그대로 concat한다(하위 호환)."""
-
-    def __init__(self, num_numeric_feats, cat_dims, embed_dims, hidden1=128, hidden2=64, dropout=0.3,
-                 bin_edges=None, quantile_d=8):
+    def __init__(self, num_numeric_feats, cat_dims, embed_dims, hidden1=128, hidden2=64, dropout=0.3):
         super().__init__()
         self.embed_dims = list(embed_dims)
         self.embeddings = nn.ModuleList([
             nn.Embedding(num_embeddings=dim + 2, embedding_dim=edim) for dim, edim in zip(cat_dims, self.embed_dims)
         ])
-        if bin_edges is not None:
-            self.quantile = QuantileEmbedding(bin_edges, d_embed=quantile_d)
-            numeric_out_dim = bin_edges.shape[0] * quantile_d
-        else:
-            self.quantile = None
-            numeric_out_dim = num_numeric_feats
-        total_input_dim = sum(self.embed_dims) + numeric_out_dim
+        total_input_dim = sum(self.embed_dims) + num_numeric_feats
         self.mlp = nn.Sequential(
             nn.Linear(total_input_dim, hidden1), nn.BatchNorm1d(hidden1), nn.ReLU(), nn.Dropout(dropout),
             nn.Linear(hidden1, hidden2), nn.BatchNorm1d(hidden2), nn.ReLU(),
@@ -84,15 +40,22 @@ class TabularMLP(nn.Module):
     def forward(self, x_cat, x_num):
         embeds = [emb(x_cat[:, i].long()) for i, emb in enumerate(self.embeddings)]
         x_embed = torch.cat(embeds, dim=1)
-        x_num_enc = self.quantile(x_num) if self.quantile is not None else x_num
-        x_all = torch.cat([x_embed, x_num_enc], dim=1)
+        x_all = torch.cat([x_embed, x_num], dim=1)
         return self.sigmoid(self.mlp(x_all)).squeeze(-1)
 
 
-def _aggregate_trackman(df_trm_copy, group_cols):
-    """group_cols 기준으로 트랙맨 물리량 8개를 구종군별 mean/std로 집계+피벗한 표를 반환.
-    (feature_engineering.py::process_trackman_features_safe 의 집계 로직과 동일)"""
-    grouped = df_trm_copy.groupby(group_cols + ["pitch_type_group", "auto_pitch_type"])
+def process_trackman_features(df_main, df_trm):
+    """feature_engineering.py::process_trackman_features_safe 와 동일 (추론 시점이라 시간필터 없음, 복제).
+
+    결측치는 test.csv 유래 통계가 아니라 trackman_history.csv(공식 데이터) 자체 평균인
+    고정값으로 채운다 (평가 데이터 독립 예측 원칙 준수 — CLAUDE.md 참고).
+    """
+    df_main_copy = df_main.copy()
+    df_trm_copy = df_trm.copy()
+
+    match_cols = [c for c in df_main_copy.columns if (c in df_trm_copy.columns) and c != "row_id"]
+
+    grouped = df_trm_copy.groupby(match_cols + ["pitch_type_group", "auto_pitch_type"])
     grouped_phase1 = grouped[["rel_speed", "spin_rate", "induced_vert_break", "horz_break", "extension", "rel_height", "rel_side", "zone_speed"]].agg(["mean", "std"])
     grouped_phase2 = grouped_phase1.reset_index()
 
@@ -101,55 +64,22 @@ def _aggregate_trackman(df_trm_copy, group_cols):
     grouped_phase2.columns = ["_".join(c).strip("_") for c in grouped_phase2.columns]
 
     grouped_phase3 = grouped_phase2.drop(columns="auto_pitch_type")
-    grouped_phase3 = grouped_phase3.groupby(group_cols + ["pitch_type_group"]).agg(["mean"])
+    grouped_phase3 = grouped_phase3.groupby(match_cols + ["pitch_type_group"]).agg(["mean"])
 
     pivoted = grouped_phase3.unstack(level="pitch_type_group")
     pivoted.columns = [f"{c[0]}_{c[1]}_{c[2]}" for c in pivoted.columns]
-    result = pivoted.reset_index()
-    return result.fillna(0)
-
-
-def process_trackman_features(df_main, df_trm):
-    """feature_engineering.py::process_trackman_features_safe 와 동일하되(추론 시점이라
-    시간필터 없음, 복제), 결측치 처리는 3단계로 강화:
-
-    1차: season 포함 10개 컬럼으로 매칭(학습 때와 동일 정밀도).
-    2차(fallback): 2025 test처럼 season이 trackman_history.csv 범위(2019~2024) 밖이라
-        1차 매칭이 100% 실패하는 상황을 위해, season을 뺀 9개 컬럼으로 재매칭한
-        "상황별" 값으로 채움 (원작자 노트: "2025년 실제 제출시엔 9개로 매칭해야함").
-        학습 파이프라인(`feature_engineering.py`)은 그대로 10개를 쓰고, 이 fallback은
-        추론에서만 적용됨.
-    3차(최종 보정): 그래도 결측이면(9개 조합조차 트랙맨에 없는 극희귀 케이스) 전체 평균으로
-        채움. 전부 trackman_history.csv(공식 데이터) 유래 고정값이라 "평가 데이터 독립
-        예측 원칙"을 그대로 준수함.
-    """
-    df_main_copy = df_main.copy()
-    df_trm_copy = df_trm.copy()
-
-    match_cols = [c for c in df_main_copy.columns if (c in df_trm_copy.columns) and c != "row_id"]
-    fallback_cols = [c for c in match_cols if c != "season"]
-
-    tm_final = _aggregate_trackman(df_trm_copy, match_cols)
-    tm_fallback = _aggregate_trackman(df_trm_copy, fallback_cols)
+    tm_final = pivoted.reset_index()
+    tm_final = tm_final.fillna(0)
 
     df_main_copy["top_bottom"] = df_main_copy["top_bottom"].map({"T": 0, "B": 1}).astype(np.int64)
-    for tbl in (tm_final, tm_fallback):
-        tbl["top_bottom"] = tbl["top_bottom"].map({"Top": 0, "Bottom": 1}).astype(np.int64)
-        for col in ["batter_hand", "pitcher_hand"]:
-            if col in tbl.columns:
-                tbl[col] = tbl[col].map({"Left": 1, "Right": 2}).astype(np.int64)
+    tm_final["top_bottom"] = tm_final["top_bottom"].map({"Top": 0, "Bottom": 1}).astype(np.int64)
+    for col in ["batter_hand", "pitcher_hand"]:
+        if col in tm_final.columns:
+            tm_final[col] = tm_final[col].map({"Left": 1, "Right": 2}).astype(np.int64)
 
     tr_final = pd.merge(df_main_copy, tm_final, on=match_cols, how="left")
     new_feature_cols = [c for c in tm_final.columns if c not in match_cols]
-
-    # 2차: 1차 매칭 실패 행만 season 제외(9개) 상황별 fallback으로 채움
-    fb_merged = pd.merge(df_main_copy[fallback_cols], tm_fallback, on=fallback_cols, how="left")
-    for col in new_feature_cols:
-        missing = tr_final[col].isna()
-        if missing.any():
-            tr_final.loc[missing, col] = fb_merged.loc[missing, col].values
-
-    # 3차: 그래도 남은 결측은 전체 평균(트랙맨 데이터 자체 유래 고정값)으로 최종 보정
+    # tm_final(트랙맨 집계 결과, 공식 데이터 유래)의 평균 — test.csv와 무관한 고정값
     fill_values = tm_final[new_feature_cols].mean()
     tr_final[new_feature_cols] = tr_final[new_feature_cols].fillna(fill_values)
     return tr_final
@@ -173,8 +103,6 @@ def add_engineered_features(df, league_success_mean):
     df["matchup"] = df["asof_pitcher_success_rate"] - df["asof_batter_success_rate"]
     pressure_signal = df["li"] * ((df["strikes_before"] >= 2) | (df["balls_before"] >= 3)).astype(np.int64)
     df["count_pressure"] = df["pitcher_relative_success"] * pressure_signal
-    df["same_hand"] = (df["pitcher_hand"] == df["batter_hand"]).astype(np.int64)
-    df["same_hand_advantage"] = df["pitcher_relative_success"] * df["same_hand"]
     return df
 
 
@@ -245,11 +173,8 @@ def main():
     features = [c for c in tr_final.columns if c not in drop_cols]
     X_test = tr_final[features]
 
-    # CatBoost 예측: same_hand/same_hand_advantage는 CatBoost 학습 때 제외한 피처라
-    # (2023+2024 이중검증에서 손해로 나옴, 2026-08-16) 예측 시에도 동일하게 제외해야 함.
-    catboost_exclude_cols = ["same_hand", "same_hand_advantage"]
-    catboost_features = [c for c in features if c not in catboost_exclude_cols]
-    cat_preds = bundle["catboost_model"].predict_proba(X_test[catboost_features])[:, 1]
+    # CatBoost 예측
+    cat_preds = bundle["catboost_model"].predict_proba(X_test)[:, 1]
 
     # MLP 예측 (7-seed 평균)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -267,11 +192,6 @@ def main():
                 num_numeric_feats=len(mlp_bundle["num_cols"]),
                 cat_dims=mlp_bundle["cat_dims"],
                 embed_dims=mlp_bundle["embed_dims"],
-                hidden1=mlp_bundle.get("hidden1", 128),
-                hidden2=mlp_bundle.get("hidden2", 64),
-                dropout=mlp_bundle.get("dropout", 0.3),
-                bin_edges=mlp_bundle.get("bin_edges"),
-                quantile_d=mlp_bundle.get("quantile_d", 8),
             ).to(device)
             model.load_state_dict(member["state_dict"])
             model.eval()
