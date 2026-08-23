@@ -424,11 +424,20 @@ PLE 반영 상태 기준, 2026-08-16)**:
     but 미래 월" 상황에서 어떻게 동작하는지를 로컬에서도 어느 정도 잡아낼 수 있어서,
     §7의 968.15→862 회귀 사고 같은 "로컬로는 검증 불가" 패턴을 줄이는 게 목적. 공용 fold
     유틸로 만들어서 이후 모든 실험(§6-9 이후)이 이 위에서 돌아가도록 통일 예정.
-16. **CatBoost RMSE(직접 Brier) objective 실험 (착수 예정).** 현재 CatBoost는
-    `loss_function="Logloss"`, `eval_metric="BrierScore"`로 목적함수-평가지표가 어긋나
-    있음(`full_retrain_blend_f1.py:59`). Brier score는 정의상 MSE이므로 `loss_function="RMSE"`로
-    바꾸면 실제 채점 지표를 직접 최적화하게 됨 — 아직 시도 안 해본 방향. 968.15
-    레시피(구종비중+F1) 기준, 위 15번 프로토콜로 Logloss vs RMSE 비교 예정.
+16. ~~**CatBoost RMSE(직접 Brier) objective 실험**~~ **완료(사이드 체크), 2026-08-23.**
+    `loss_function="Logloss"` vs `RMSE`(회귀, 예측값 [0,1] clip) 비교, 968.15 레시피(구종비중+F1)
+    기준 15번 프로토콜 중 필수 2-fold만(`experiment_catboost_rmse_objective.py`):
+
+    | objective | half_2024 | expand_2023 | 평균 |
+    |---|---|---|---|
+    | Logloss(기존) | 732.31 | 616.53 | 674.42 |
+    | RMSE | 740.27 | 615.75 | **678.01** |
+
+    평균 +3.59로 RMSE가 근소 우위지만 fold별 방향이 엇갈림(half_2024 +7.96 RMSE 우세 /
+    expand_2023 -0.78 Logloss 우세) — **노이즈 범위 안일 가능성이 높아 결론 보류.** 예측
+    확률이 좁은 구간(0.4~0.55)에 몰려있어 Logloss/RMSE 그래디언트 차이가 원래 작을 걸로
+    예상했던 것과 일치. 추가 investment(전체 expanding fold, 시드 반복)는 지금은 안 함 —
+    다음 우선순위(17번)로 이동.
 17. **기존 피처 가중치 부여 실험 (2026-08-23 회의 아이디어, 착수 예정).** 새 파생피처
     추가는 이미 여러 번 실패(§2 "신규 파생피처 3종" 등) — 대신 기존 피처들에 학습 시
     가중치(sample_weight 또는 피처별 스케일링)를 부여하는 방향. 16번 실험 이후 진행 예정.
