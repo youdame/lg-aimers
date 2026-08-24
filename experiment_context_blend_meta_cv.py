@@ -16,7 +16,7 @@ from sklearn.model_selection import KFold
 
 from local_validation import score
 
-FOLD_NAMES = ["half_2024", "expand_2023"]
+FOLD_NAMES = ["half_2024", "expand_2023", "expand_2021", "expand_2022"]
 BLEND_ALPHA = 0.61
 N_SPLITS = 5
 SPLIT_SEED = 42
