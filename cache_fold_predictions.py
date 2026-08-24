@@ -124,7 +124,7 @@ def run_fold(df, df_trm, train_df, tr_final, train_mask, val_mask, fold_name):
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     df, df_trm, train_df, tr_final = build_base_df()
-    for fold_name, train_mask, val_mask in iter_folds(train_df, val_seasons=(2023,)):
+    for fold_name, train_mask, val_mask in iter_folds(train_df):
         out_path = os.path.join(OUT_DIR, f"fold_predictions_{fold_name}.pkl")
         if os.path.exists(out_path):
             print(f"[{fold_name}] 이미 캐싱됨, 스킵: {out_path}", flush=True)
