@@ -5,7 +5,9 @@ EXPERIMENTS.md §7 후속.
 스레드 히스토그램 계산이 완전히 결정론적이지 않다는 게 이미 확인된 상태라(창현님
 저장소, ~7점 차), 시드 여러 개 평균 내면 이 노이즈를 줄여 안정적 이득이 있을 수 있음.
 
-half_2024 fold(실전과 제일 유사) 기준, 시드 5개 평균 vs 단일시드(기존 744.52) 비교.
+half_2024 fold에서 +4.39 확인(744.52->770.69) 후 이미 프로덕션 코드(`full_retrain_
+blend_f1.py`)에 반영했었음 — 재학습 전에 두 번째 fold(expand_2023)에서도 재현되는지
+뒤늦게 확인(2026-08-25). CatBoost 전용이라 MLP 없이도 빠름(fold당 5seed ~35~40분).
 """
 import json
 import os
@@ -35,13 +37,7 @@ BASE_PARAMS = dict(
 )
 
 
-def build_data():
-    df = pd.read_csv(os.path.join(DATA_DIR, "train.csv"))
-    df_trm = pd.read_csv(os.path.join(DATA_DIR, "trackman_history.csv"))
-    tr_final, _ = process_trackman_features_safe(df, df_trm, is_train_split=True)
-    train_df = tr_final.dropna(subset=[TARGET]).reset_index(drop=True)
-
-    train_mask, val_mask = next(iter_folds(train_df, val_seasons=(), include_half_2024=True))[1:]
+def build_data(train_df, df, df_trm, tr_final, train_mask, val_mask):
     league_success_mean = train_df.loc[train_mask, TARGET].mean()
     fold_df = add_engineered_features(train_df, league_success_mean)
 
@@ -74,11 +70,13 @@ def build_data():
     return train_pool, val_pool, y_val
 
 
-def main():
-    print("[멀티시드] half_2024 fold 데이터 준비 중...", flush=True)
-    train_pool, val_pool, y_val = build_data()
-
+def run_fold(fold_name, train_pool, val_pool, y_val):
+    """개별 시드 vs 앙상블 비교는 이 함수 안에서 자기완결적으로 이뤄짐(외부 기준선을
+    끌어오지 않음) — half_2024 최초 검증 때도 실제로는 이 방식(개별 최고 시드 대비
+    앙상블 delta)으로 채택 판단했고, 스크립트에 있던 외부 하드코딩 기준선(744.52)은
+    당시 Track A가 빠진 값이라 비교 대상이 달라 애초에 무의미했음."""
     preds_list = []
+    seed_scores = {}
     for seed in SEEDS:
         t0 = time.time()
         model = CatBoostClassifier(**BASE_PARAMS, iterations=1500, random_seed=seed)
@@ -86,16 +84,36 @@ def main():
         preds = model.predict_proba(val_pool)[:, 1]
         preds_list.append(preds)
         s = score(preds, y_val)
+        seed_scores[seed] = s
         cum_avg = np.mean(preds_list, axis=0)
         cum_score = score(cum_avg, y_val)
-        print(f"[seed={seed}] 단독={s:.2f} | 지금까지 누적앙상블({len(preds_list)}개)={cum_score:.2f} "
+        print(f"[{fold_name}][seed={seed}] 단독={s:.2f} | 누적앙상블({len(preds_list)}개)={cum_score:.2f} "
               f"({time.time()-t0:.1f}s)", flush=True)
 
     final_ens = np.mean(preds_list, axis=0)
     final_score = score(final_ens, y_val)
-    print(f"\n=== 최종 {len(SEEDS)}-seed 앙상블: {final_score:.2f} ===", flush=True)
-    print(f"참고: 기존 단일시드(seed=42) 기준선 = 744.52", flush=True)
-    print(f"Δ = {final_score - 744.52:+.2f}", flush=True)
+    best_individual = max(seed_scores.values())
+    print(f"[{fold_name}] === {len(SEEDS)}-seed 앙상블: {final_score:.2f} ===", flush=True)
+    print(f"[{fold_name}] 개별 시드 중 최고: {best_individual:.2f} | 앙상블 대비 Δ = {final_score - best_individual:+.2f}", flush=True)
+    return final_score
+
+
+def main():
+    print("[멀티시드] 데이터 준비 중...", flush=True)
+    df = pd.read_csv(os.path.join(DATA_DIR, "train.csv"))
+    df_trm = pd.read_csv(os.path.join(DATA_DIR, "trackman_history.csv"))
+    tr_final, _ = process_trackman_features_safe(df, df_trm, is_train_split=True)
+    train_df = tr_final.dropna(subset=[TARGET]).reset_index(drop=True)
+
+    results = {}
+    for fold_name, train_mask, val_mask in iter_folds(train_df, val_seasons=(2023,)):
+        train_pool, val_pool, y_val = build_data(train_df, df, df_trm, tr_final, train_mask, val_mask)
+        results[fold_name] = run_fold(fold_name, train_pool, val_pool, y_val)
+
+    print("\n=== 요약 (시즌진행분+Track A 기준, CatBoost 5-seed 앙상블, reverse_rate 미포함) ===", flush=True)
+    for fold_name, s in results.items():
+        print(f"{fold_name}: {s:.2f}", flush=True)
+    print(f"평균: {np.mean(list(results.values())):.2f}", flush=True)
 
 
 if __name__ == "__main__":
