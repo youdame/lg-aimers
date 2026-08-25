@@ -888,6 +888,13 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
 | 보류(제출 안 함, 로컬만 재검증 예정) | quantile PLE 재도입 — 과거 실전 사고의 "범인"이라는 근거는 아니었음(오히려 무죄 쪽 증거), 대신 fallback 취약성 시뮬레이션+창현님 저장소 교차비교라는 약한 정황 근거로 보류 중(위 상세) |
 | 미완료 | CatBoost/MLP 하이퍼파라미터 재탐색(다음 세션) |
 
+**⚠️ 최종 제출 전 필수 확인(2026-08-25 밤, 유담님 지시)**: `full_retrain_blend_f1.py`의
+`CATBOOST_SEEDS`가 지금 **임시로 `ENSEMBLE_SEEDS[:1]`(1-seed)로 낮춰져 있음** —
+hand_matchup/no_both 등 다른 후보를 빠르게 회전시키려고 오늘 밤 중간 재학습들에서만
+쓰는 임시 설정. 멀티시드 자체는 이미 두 fold(half_2024 +5.01/expand_2023 +10.30)
+검증 끝난 확정 채택 항목이라, **오늘 밤 마지막(진짜 제출용) 재학습 실행 직전에
+`ENSEMBLE_SEEDS[:5]`로 반드시 되돌릴 것.** 코드에도 TODO 주석 남겨둠.
+
 ### 2026-08-25 다음 계획 (우선순위 순)
 
 1. **[진행 중]** reverse_rate 시즌분해 완료 대기 (`experiment_season_progression_reverse.py`, 백그라운드) — 끝나는 대로 775.45 기준선 대비 채택/기각 판정

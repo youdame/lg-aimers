@@ -25,10 +25,14 @@ from mlp_model import (
 
 # CatBoost 멀티시드 앙상블 (2026-08-25, 수연님 실측 근거: CatBoost 단독 5-seed로
 # 1007.52). MLP의 ENSEMBLE_SEEDS 앞 5개 재사용 -- 시드 값 자체는 의미 없고 그냥
-# 서로 다른 값이면 됨. half_2024 fold 검증: 개별 시드 최고(766.30)보다 앙상블이
-# +4.39 높음(770.69), 단일 최고 시드를 뽑은 우연이 아니라 진짜 앙상블 이득
-# (EXPERIMENTS.md 참고).
-CATBOOST_SEEDS = ENSEMBLE_SEEDS[:5]
+# 서로 다른 값이면 됨. 두 fold 다 재확인 완료: seed=42 대비 앙상블이 half_2024
+# +5.01 / expand_2023 +10.30 (EXPERIMENTS.md 참고). **채택 확정, 효과 검증 끝남.**
+#
+# !!! 임시로 1-seed로 낮춰둔 상태 (2026-08-25 밤) !!! 5-seed는 재학습에 ~45분을
+# 추가로 먹어서, 오늘 밤 hand_matchup/no_both 등 다른 후보를 빠르게 돌려보는 동안엔
+# 1-seed로 회전을 빠르게 하기로 함(유담님 확정). **오늘 밤 마지막(최종 제출용)
+# 재학습에서는 반드시 [:5]로 되돌릴 것 — 빼먹지 말 것.**
+CATBOOST_SEEDS = ENSEMBLE_SEEDS[:1]  # TODO(최종 제출 전 필수): ENSEMBLE_SEEDS[:5]로 복원
 
 DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
 
