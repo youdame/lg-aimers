@@ -25,7 +25,10 @@ from mlp_model import (
 
 DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
 
-from feature_engineering import process_trackman_features_safe, add_engineered_features
+from feature_engineering import (
+    process_trackman_features_safe, add_engineered_features,
+    build_season_end_lookup, apply_te_residual_features, TE_RESIDUAL_COLS,
+)
 from experiment_pitchmix_coarse import compute_coarse_pitchmix, COARSE_COLS
 
 DATA_DIR = "./data"
@@ -64,6 +67,11 @@ def main():
 
     tr_final, match_cols = process_trackman_features_safe(df, df_trm, is_train_split=False)
     train_df = tr_final.dropna(subset=[TARGET]).reset_index(drop=True)
+    # 시즌 진행분(동섭님 피처) lookup: submit/script.py가 test.csv에 그대로 적용할 수
+    # 있도록 정적으로 저장(대회 규칙: 평가 데이터 독립 예측 원칙 — test.csv 자기
+    # 자신으로는 계산 불가하므로 train.csv 전체로 1회 계산). add_engineered_features가
+    # 내부적으로 동일 함수를 호출해 실제 적용도 같이 수행함.
+    season_end_lookup = build_season_end_lookup(train_df)
     league_success_mean = train_df[TARGET].mean()
     train_df = add_engineered_features(train_df, league_success_mean)
 
@@ -78,11 +86,19 @@ def main():
     train_df = train_df[~f1_drop].reset_index(drop=True)
     print(f"[F1 필터] {f1_drop.sum()}행 제외 ({before_n} -> {len(train_df)})", flush=True)
 
+    # Track A(지훈님 아이디어, target-encoding 잔차 6개, CatBoost 전용): te_source/
+    # te_prior는 F1 필터 적용된 train_df 자신(홀드아웃 없는 full retrain이라 train_df
+    # 전체가 곧 "학습 파티션"). submit/script.py도 이 te_source/te_prior를 그대로
+    # 재사용(정적 동봉)해서 test.csv에 적용.
+    te_prior = train_df[TARGET].mean()
+    te_source = train_df.copy()
+    train_df = apply_te_residual_features(te_source, train_df, te_prior)
+
     drop_cols = ["row_id", TARGET]
     features = [c for c in train_df.columns if c not in drop_cols]
-    num_cols = [c for c in features if c not in CAT_COLS]
+    num_cols = [c for c in features if c not in CAT_COLS and c not in TE_RESIDUAL_COLS]
     categorical_features_cb = [c for c in tr_final.select_dtypes(include="object").columns if c != "row_id" and c in features]
-    print(f"[Full Retrain] {len(train_df)}행, {len(features)}개 피처", flush=True)
+    print(f"[Full Retrain] {len(train_df)}행, {len(features)}개 피처 (Track A {len(TE_RESIDUAL_COLS)}개 포함, CatBoost 전용)", flush=True)
 
     # --- CatBoost 전체 재학습 ---
     t0 = time.time()
@@ -125,12 +141,17 @@ def main():
     mlp_bundle = make_bundle(full_members, CAT_COLS, num_cols, cat_dims, embed_dims, cat_encoder, num_imputer, num_scaler)
     print(f"[Full Retrain] MLP 전체 완료 ({time.time()-t0:.1f}s)", flush=True)
 
+    te_source_cols = ["pitcher_id", "batter_id", "balls_before", "strikes_before",
+                       "batter_hand", "num_runners_on", "inning", "season", TARGET]
     final_bundle = {
         "catboost_model": cat_model,
         "mlp_bundle": mlp_bundle,
         "alpha": BLEND_ALPHA,
         "catboost_best_iteration": catboost_iterations,
         "f1_filter_applied": True,
+        "season_end_lookup": season_end_lookup,
+        "te_source": te_source[te_source_cols].copy(),
+        "te_prior": te_prior,
     }
     OUT_PATH = "./submit/model/final_retained_model.pkl"
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)

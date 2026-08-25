@@ -106,6 +106,90 @@ def add_engineered_features(df, league_success_mean):
     return df
 
 
+def apply_season_progression_features(df, lookup):
+    """feature_engineering.py::apply_season_progression_features 와 동일 (복제).
+    lookup은 model/final_retained_model.pkl에 정적 동봉된 것을 그대로 씀 — test.csv
+    자기 자신으로는 lookup을 만들 수 없음(과거 시즌 행/control_success 없음, 평가
+    데이터 독립 예측 원칙)."""
+    df = df.copy()
+    specs = [
+        ("pitcher", "pitcher_id", "asof_pitcher_n", "asof_pitcher_success_rate"),
+        ("batter", "batter_id", "asof_batter_n", "asof_batter_success_rate"),
+    ]
+    for role, id_col, n_col, rate_col in specs:
+        lut = lookup.loc[lookup["role"] == role, ["id", "season", "end_n", "end_rate", "end_success"]]
+        merged = df[[id_col, "season"]].merge(
+            lut, left_on=[id_col, "season"], right_on=["id", "season"], how="left",
+        )
+        pre_n = (merged["end_n"] + 1).fillna(0).values
+        pre_success = ((merged["end_n"] * merged["end_rate"]).round().fillna(0) + merged["end_success"].fillna(0)).values
+        cum_n = df[n_col].values
+        cum_success = np.round(df[n_col].values * df[rate_col].values)
+        season_n = np.maximum(cum_n - pre_n, 0)
+        season_success = np.maximum(cum_success - pre_success, 0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            season_rate = np.where(season_n > 0, season_success / season_n, np.nan)
+        df[f"{role}_season_n"] = season_n
+        df[f"{role}_season_success_count"] = season_success
+        df[f"{role}_season_success_rate"] = season_rate
+        df[f"{role}_season_rate_gap"] = season_rate - df[rate_col].values
+    return df
+
+
+TE_K_SMOOTH = 200
+TE_AXES = [
+    ("te_p_cnt", ["pitcher_id", "balls_before", "strikes_before"], "p_main"),
+    ("te_p_bhand", ["pitcher_id", "batter_hand"], "p_main"),
+    ("te_p_run", ["pitcher_id", "num_runners_on"], "p_main"),
+    ("te_p_inn", ["pitcher_id", "inning"], "p_main"),
+    ("te_b_cnt", ["batter_id", "balls_before", "strikes_before"], "b_main"),
+]
+TE_MAIN_AXES = [("p_main", ["pitcher_id"]), ("b_main", ["batter_id"])]
+TE_RESIDUAL_COLS = [f"{name}_res" for name, *_ in TE_AXES] + ["te_covered"]
+
+
+def causal_smoothed_te_encode(source_df, query_df, group_cols, prior, k=TE_K_SMOOTH):
+    """feature_engineering.py::causal_smoothed_te_encode 와 동일 (복제). source_df는
+    model 번들에 정적 동봉된 te_source(F1 필터 적용된 train.csv 유래, 공식 데이터) —
+    test.csv와 무관한 고정 데이터."""
+    agg = source_df.groupby(group_cols + ["season"])["control_success"].agg(["sum", "count"]).reset_index()
+    agg = agg.sort_values("season")
+    agg["cum_sum"] = agg.groupby(group_cols)["sum"].cumsum()
+    agg["cum_n"] = agg.groupby(group_cols)["count"].cumsum()
+    agg = agg[group_cols + ["season", "cum_sum", "cum_n"]].sort_values("season")
+
+    query = query_df[group_cols + ["season"]].reset_index()
+    query_sorted = query.sort_values("season")
+    merged = pd.merge_asof(
+        query_sorted, agg, on="season", by=group_cols,
+        direction="backward", allow_exact_matches=False,
+    )
+    merged = merged.sort_values("index")
+    cum_sum = merged["cum_sum"].fillna(0.0).values
+    cum_n = merged["cum_n"].fillna(0.0).values
+    enc = (cum_sum + prior * k) / (cum_n + k)
+    covered = (cum_n > 0).astype(np.int64)
+    return enc, covered
+
+
+def apply_te_residual_features(source_df, query_df, prior):
+    """feature_engineering.py::apply_te_residual_features 와 동일 (복제). CatBoost
+    전용 — MLP num_cols에는 애초에 포함 안 됨(학습 시점에 고정된 mlp_bundle["num_cols"])."""
+    query_df = query_df.copy()
+    mains = {}
+    covered_any = np.zeros(len(query_df), dtype=np.int64)
+    for name, group_cols in TE_MAIN_AXES:
+        enc, covered = causal_smoothed_te_encode(source_df, query_df, group_cols, prior)
+        mains[name] = enc
+        covered_any = np.maximum(covered_any, covered)
+    for name, group_cols, main_key in TE_AXES:
+        enc, covered = causal_smoothed_te_encode(source_df, query_df, group_cols, prior)
+        query_df[f"{name}_res"] = enc - mains[main_key]
+        covered_any = np.maximum(covered_any, covered)
+    query_df["te_covered"] = covered_any
+    return query_df
+
+
 def add_coarse_pitchmix(df_main, df_trm):
     """experiment_pitchmix_coarse.py::compute_coarse_pitchmix + merge 로직 복제 (추론용, 시간필터 없음).
 
@@ -164,10 +248,12 @@ def main():
         bundle = pickle.load(f)
     mlp_bundle = bundle["mlp_bundle"]
 
-    # 피처 엔지니어링: 트랙맨 merge -> 파생피처 -> coarse 구종비중
+    # 피처 엔지니어링: 트랙맨 merge -> 파생피처 -> coarse 구종비중 -> 시즌 진행분 -> Track A
     tr_final = process_trackman_features(df_test, df_trm)
     tr_final = add_engineered_features(tr_final, league_success_mean)
     tr_final = add_coarse_pitchmix(tr_final, df_trm)
+    tr_final = apply_season_progression_features(tr_final, bundle["season_end_lookup"])
+    tr_final = apply_te_residual_features(bundle["te_source"], tr_final, bundle["te_prior"])
 
     drop_cols = [ID_COL, TARGET_COL]
     features = [c for c in tr_final.columns if c not in drop_cols]
