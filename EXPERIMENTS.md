@@ -889,31 +889,36 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
 | 보류(제출 안 함, 로컬만 재검증 예정) | quantile PLE 재도입 — 과거 실전 사고의 "범인"이라는 근거는 아니었음(오히려 무죄 쪽 증거), 대신 fallback 취약성 시뮬레이션+창현님 저장소 교차비교라는 약한 정황 근거로 보류 중(위 상세) |
 | 미완료 | CatBoost/MLP 하이퍼파라미터 재탐색(다음 세션) |
 
-**CatBoost 시드 수 최종 결정(2026-08-25 밤 8시반, 유담님 지시로 정정)**:
-`full_retrain_blend_f1.py`의 `CATBOOST_SEEDS = ENSEMBLE_SEEDS[:1]`(1-seed)를
-**오늘 밤 제출용 재학습에도 그대로 씀** — 원래는 "탐색 단계만 1-seed, 최종은
-5-seed로 복원" 계획이었는데, 시간(10시 전 제출 목표) 때문에 오늘 밤은 1-seed로
-간다. 멀티시드 자체(두 fold 검증된 +5.01/+10.30 이득)는 여전히 유효한 채택
-항목 — **다음 제출(내일)에서 5-seed로 복원해서 추가 이득을 챙기는 걸로 이월.**
+**CatBoost 시드 수 — 최종적으로 5-seed로 확정(2026-08-25 밤 9시, 재정정)**:
+한때 시간 때문에 1-seed로 낮췄다가, 메타모델 단독 실전 결과(로컬 +14.55 →
+실전 **+25.52**, 1.75배)를 보고 나머지 검증된 개선사항도 실전에서 더 크게 나올
+걸로 기대해서 **5-seed로 다시 복원**(코드 반영 완료). 대신 제출 목표 시각을
+10시 → **자정(12시) 전**으로 늦춤.
 
-### 2026-08-25 다음 계획 — 최신판 (밤 8시반 기준, 이전 버전 대체)
+**메타모델 재학습(계수 재추정)은 스킵하기로 함(2026-08-25 밤)**: reverse_rate/
+멀티시드가 새로 들어간 CatBoost/MLP 예측값으로 메타모델 계수를 다시 fitting하면
+더 정확하겠지만, fold 하나에서 5-seed CatBoost+MLP 7-seed를 또 돌려야 해서
+70분+ 추가로 듦 — 자정 목표 때문에 스킵, 기존 계수(이미 실전 +25.52로 검증됨,
+2개 입력 로지스틱이라 견고할 걸로 판단) 그대로 사용.
 
-**오늘 밤 (우선순위 순)**
+### 2026-08-25 밤 9시 최신 계획 (이전 버전 대체)
 
+**오늘 밤 (자정 전 제출 목표, 우선순위 순)**
+
+0. **[완료]** `submit_0825.zip`(v7+메타모델만, reverse_rate/멀티시드 등 미포함) 제출
+   → **실전 1085.24**, 1059.72 대비 +25.52. 신규 최고 기록.
 1. **[진행 중, 2번째 시도]** hand_matchup / no_both, CatBoost 전용 단일시드 빠른 검증
    (`experiment_domain_handmatchup_nobos.py`, 백그라운드). 1차 시도는 중간에 실수로
    kill되어 half_2024 baseline(769.10)/hand_matchup(768.12, -0.98) 2개만 나오고
    중단됨 — 처음부터 재실행 중.
 2. **[대기]** 플래툰 스플릿 / 압박 플래그, CatBoost 전용 단일시드 빠른 검증
-   (`experiment_domain_platoon_pressure_fast.py`, 1번 끝나면 이어서) — 10시 목표
-   시간상 순서상 밀리면 생략하고 내일로 넘길 수 있음
-3. **[판단]** 위 후보들 — **CatBoost에서 좋으면 그걸로 채택 확정**, MLP num_cols엔
-   안 넣고 CatBoost 피처 목록에만 추가(Track A와 동일 라우팅 패턴). MLP 적합성은
-   몰라도 됨 — 안 먹이니까 상관없음. 채택된 것들 `feature_engineering.py`/
-   `full_retrain_blend_f1.py`/`submit/script.py`에 이식.
-4. **[결정 변경]** `CATBOOST_SEEDS`는 오늘 밤 제출용 재학습에도 `[:1]`(1-seed) 유지
-   — 시간 우선, 5-seed 복원은 내일 제출로 이월(위쪽 상세 참고)
-5. **[최종]** 전체 재학습 → 5행 스모크테스트 → zip 패키징(짧은 파일명) → 제출
+   (`experiment_domain_platoon_pressure_fast.py`, 1번 끝나면 이어서)
+3. **[판단]** 위 후보들 — CatBoost에서 좋으면 그걸로 채택 확정, MLP num_cols엔
+   안 넣고 CatBoost 피처 목록에만 추가(Track A와 동일 라우팅 패턴). 채택된 것들
+   `feature_engineering.py`/`full_retrain_blend_f1.py`/`submit/script.py`에 이식.
+4. **[완료]** `CATBOOST_SEEDS = ENSEMBLE_SEEDS[:5]` 복원 완료
+5. **[최종]** 전체 재학습(5-seed CatBoost + MLP 7-seed, 기존 메타모델 계수 그대로)
+   → 5행 스모크테스트 → zip 패키징(짧은 파일명) → 제출 (자정 전 목표)
 
 **내일 (오늘 밤 안 끝난 것들 + 원래 있던 백로그)**
 
@@ -928,7 +933,11 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
    적용
 5. CatBoost/MLP 하이퍼파라미터 재탐색 (`tune_catboost_v2.py`, Optuna 18trial 착수했다
    중단된 상태)
-6. 오늘 밤 제출 결과 확인 후, 예상과 다르면(특히 로컬 대비 실전이 많이 낮으면) 아껴둔
+6. **메타모델 계수 재추정** — 오늘 밤은 스킵(시간 때문에 기존 계수로 감). reverse_rate/
+   멀티시드/도메인 피처가 반영된 CatBoost/MLP 예측값으로 half_2024 fold에서
+   70/30 same-regime 재fitting(`experiment_logistic_meta_samefold.py` 방법론
+   그대로) — 지금보다 더 정확한 계수를 얻을 수 있는 순수 업사이드
+7. 오늘 밤 제출 결과 확인 후, 예상과 다르면(특히 로컬 대비 실전이 많이 낮으면) 아껴둔
    제출권으로 원인 분리(reverse_rate만 빼고 재제출 등)
 
 ## 관련 파일
