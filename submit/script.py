@@ -227,6 +227,19 @@ def add_pressure_flag(df):
     return df
 
 
+SAME_HAND_COLS = ["same_hand", "same_hand_advantage"]
+
+
+def add_same_hand(df):
+    """feature_engineering.py::add_same_hand 와 동일 (복제). MLP 전용 — CatBoost
+    피처 목록(X_test_cb)에서는 명시적으로 제외, mlp_bundle["num_cols"]에는 포함되므로
+    MLP 쪽은 자동으로 반영됨."""
+    df = df.copy()
+    df["same_hand"] = (df["pitcher_hand"].astype(str) == df["batter_hand"].astype(str)).astype(np.int64)
+    df["same_hand_advantage"] = df["pitcher_relative_success"] * df["same_hand"]
+    return df
+
+
 def add_coarse_pitchmix(df_main, df_trm):
     """experiment_pitchmix_coarse.py::compute_coarse_pitchmix + merge 로직 복제 (추론용, 시간필터 없음).
 
@@ -293,13 +306,15 @@ def main():
     tr_final = apply_rate_progression_features(tr_final, bundle["rate_end_lookup"])
     tr_final = apply_te_residual_features(bundle["te_source"], tr_final, bundle["te_prior"])
     # 득점권 압박 플래그는 근거가 약해서(노이즈 수준) 최종적으로 제외 -- 함수는 남겨둠
+    tr_final = add_same_hand(tr_final)  # MLP 전용(2026-08-26 채택), CatBoost 피처에서는 제외
 
     drop_cols = [ID_COL, TARGET_COL]
     features = [c for c in tr_final.columns if c not in drop_cols]
     X_test = tr_final[features]
+    X_test_cb = tr_final[[c for c in features if c not in SAME_HAND_COLS]]
 
     # CatBoost 예측 (5-seed 앙상블 평균, 2026-08-25 채택)
-    cat_preds = np.mean([m.predict_proba(X_test)[:, 1] for m in bundle["catboost_models"]], axis=0)
+    cat_preds = np.mean([m.predict_proba(X_test_cb)[:, 1] for m in bundle["catboost_models"]], axis=0)
 
     # MLP 예측 (7-seed 평균)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

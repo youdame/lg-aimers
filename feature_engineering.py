@@ -150,6 +150,20 @@ def apply_rate_progression_features(df, lookup):
 
 PRESSURE_FLAG_COLS = ["scoring_pos_pressure_flag", "scoring_pos_pressure_li"]
 
+SAME_HAND_COLS = ["same_hand", "same_hand_advantage"]
+
+
+def add_same_hand(df):
+    """투수-타자 손 매치업 플래그 2개 (2026-08-16 원 발견, 2026-08-26 새벽 현재
+    파이프라인으로 재검증 후 재채택). **MLP 전용** — CatBoost/MLP 정반대 패턴이 오늘
+    다시 확인됨: CatBoost 두 fold 다 마이너스(-13.04/-0.72), MLP 두 fold 다 플러스
+    (+6.72/+49.81, 2026-08-16 원래 발견한 +47.90과 거의 일치). Track A(CatBoost 전용)의
+    반대 라우팅 — CatBoost 피처 목록에서는 제외, MLP num_cols에는 포함."""
+    df = df.copy()
+    df["same_hand"] = (df["pitcher_hand"].astype(str) == df["batter_hand"].astype(str)).astype(np.int64)
+    df["same_hand_advantage"] = df["pitcher_relative_success"] * df["same_hand"]
+    return df
+
 
 def add_pressure_flag(df):
     """득점권(3루주자) + 2아웃 미만 압박 플래그 2개 (2026-08-25 밤, 이 세션 자체 고안,

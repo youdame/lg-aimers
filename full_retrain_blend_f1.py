@@ -39,7 +39,7 @@ DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.i
 from feature_engineering import (
     process_trackman_features_safe, add_engineered_features,
     build_season_end_lookup, build_rate_end_lookup, apply_te_residual_features, TE_RESIDUAL_COLS,
-    add_pressure_flag, PRESSURE_FLAG_COLS,
+    add_pressure_flag, PRESSURE_FLAG_COLS, add_same_hand, SAME_HAND_COLS,
 )
 from experiment_pitchmix_coarse import compute_coarse_pitchmix, COARSE_COLS
 
@@ -121,11 +121,16 @@ def main():
     # (유담님 판단, 2026-08-25 밤). 함수는 남겨둠(feature_engineering.py 참고),
     # 호출만 안 함 -- 나중에 추가 fold로 재검증하고 싶으면 이 두 줄만 살리면 됨.
 
+    # same_hand/same_hand_advantage: MLP 전용(Track A와 반대 라우팅). CatBoost 두 fold
+    # 다 마이너스, MLP 두 fold 다 플러스(+6.72/+49.81) 재확인 후 채택(2026-08-26 새벽).
+    train_df = add_same_hand(train_df)
+
     drop_cols = ["row_id", TARGET]
-    features = [c for c in train_df.columns if c not in drop_cols]
-    num_cols = [c for c in features if c not in CAT_COLS and c not in TE_RESIDUAL_COLS]
+    all_cols = [c for c in train_df.columns if c not in drop_cols]
+    features = [c for c in all_cols if c not in SAME_HAND_COLS]  # CatBoost: same_hand 제외
+    num_cols = [c for c in all_cols if c not in CAT_COLS and c not in TE_RESIDUAL_COLS]  # MLP: same_hand 포함
     categorical_features_cb = [c for c in tr_final.select_dtypes(include="object").columns if c != "row_id" and c in features]
-    print(f"[Full Retrain] {len(train_df)}행, {len(features)}개 피처 (Track A {len(TE_RESIDUAL_COLS)}개 포함, CatBoost 전용)", flush=True)
+    print(f"[Full Retrain] {len(train_df)}행, CatBoost {len(features)}개/MLP {len(num_cols)+len(CAT_COLS)}개 피처", flush=True)
 
     # --- CatBoost 전체 재학습 (5-seed 앙상블) ---
     t0 = time.time()
