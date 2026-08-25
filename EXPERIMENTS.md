@@ -930,7 +930,10 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
 3. Quantile PLE 로컬 전용 재검증 (제출 없이 확인만, 지금 피처셋 위에)
 4. 표본 수 신뢰도 보정 로컬 검증 (`experiment_season_progression_confidence.py`,
    작성 완료·미실행) — `sqrt(season_n/(season_n+100))`를 시즌진행분 `_season_rate_gap`에
-   적용
+   적용. **동섭님 본인 아이디어이자 본인이 이미 실전 제출까지 해봤는데 점수가
+   떨어졌다고 확인됨(2026-08-25, 유담님 전달)** — 원작자 본인의 실전 결과가
+   부정적이라 우선순위 낮음. 그래도 우리 구현이 정확히 같은지 불확실해서(K값,
+   적용 대상 등) 로컬로 한 번은 확인하되, 기대치는 낮게 잡을 것.
 5. CatBoost/MLP 하이퍼파라미터 재탐색 (`tune_catboost_v2.py`, Optuna 18trial 착수했다
    중단된 상태)
 6. **메타모델 계수 재추정** — 오늘 밤은 스킵(시간 때문에 기존 계수로 감). reverse_rate/
