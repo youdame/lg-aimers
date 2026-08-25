@@ -284,8 +284,10 @@ def main():
             preds_list.append(model(X_cat, X_num).cpu().numpy())
     mlp_preds = np.mean(preds_list, axis=0)
 
-    alpha = bundle["alpha"]
-    preds = alpha * cat_preds + (1 - alpha) * mlp_preds
+    # 2-입력 로지스틱회귀 스태킹 (고정 alpha 블렌드 대체, 2026-08-25 채택)
+    m = bundle["meta_model"]
+    logit = m["w_cat"] * cat_preds + m["w_mlp"] * mlp_preds + m["intercept"]
+    preds = 1.0 / (1.0 + np.exp(-logit))
 
     df_sub[TARGET_COL] = preds
     os.makedirs(OUTPUT_DIR, exist_ok=True)

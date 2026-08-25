@@ -38,7 +38,14 @@ CATBOOST_BEST_ITERATION = 1412
 CATBOOST_ITERATION_BUFFER = 50
 DEFAULT_FULL_RETRAIN_EPOCHS = 20
 FULL_RETRAIN_EPOCH_BUFFER = 5
-BLEND_ALPHA = 0.61
+
+# 2-입력 로지스틱회귀 스태킹(alpha 고정 블렌드 대체, 2026-08-25). half_2024 val set
+# 전체(CatBoost/MLP가 학습 때 전혀 못 본 진짜 홀드아웃)로 학습된 계수 -- 창현님 저장소
+# 방법론(같은 레짐 내부 rolling-origin)으로 재검증 완료, +14.55 (EXPERIMENTS.md 참고).
+# final_pred = sigmoid(w_cat*cat_pred + w_mlp*mlp_pred + intercept)
+META_W_CAT = 2.002827
+META_W_MLP = 1.988260
+META_INTERCEPT = -2.022844
 
 with open("./model_py311/best_catboost_pitchmix_hparams.json") as f:
     _tuned = json.load(f)["best_params"]
@@ -146,7 +153,7 @@ def main():
     final_bundle = {
         "catboost_model": cat_model,
         "mlp_bundle": mlp_bundle,
-        "alpha": BLEND_ALPHA,
+        "meta_model": {"w_cat": META_W_CAT, "w_mlp": META_W_MLP, "intercept": META_INTERCEPT},
         "catboost_best_iteration": catboost_iterations,
         "f1_filter_applied": True,
         "season_end_lookup": season_end_lookup,
