@@ -785,6 +785,25 @@ FM 표준 O(n·k) 계산). 실행 중(48분, 역시 무출력) **팀원이 DeepF
 CatBoost 멀티시드 실험(`experiment_catboost_multiseed.py`) 끝나는 대로 1번부터
 순서대로 진행 예정.
 
+### 3번(reverse_rate 시즌 진행분 분해) 결과 — 채택 (2026-08-25, `experiment_season_progression_reverse.py`)
+
+시즌진행분(success_rate만) 기준선 위에 `asof_pitcher_reverse_rate`의 시즌 분해를
+추가로 얹어서 비교(ball/strike 실험과 동일 근사 방식, 행 단위 라벨 없어 마지막 투구
+보정 생략):
+
+| | half_2024 | expand_2023 | 평균 |
+|---|---|---|---|
+| CatBoost (기존→신규) | 744.52→748.77 (+4.25) | 785.19→794.18 (+8.99) | 764.86→771.48 (+6.62) |
+| MLP (기존→신규) | 758.64→772.86 (+14.22) | 703.40→748.79 (**+45.39**) | 731.02→760.82 (+29.80) |
+| **Blend (기존→신규)** | 775.40→783.94 (+8.54) | 775.49→802.46 (**+26.97**) | **775.45→793.20 (+17.75)** |
+
+**두 fold·세 지표 전부 같은 방향으로 개선** — 시즌진행분(success_rate) 채택 때와
+동일한 기준(§ 시즌 진행분 이식 참고)을 그대로 충족. ball/strike 시즌분해(기각됨,
+fold 간 방향 갈림)와 달리 reverse_rate는 방향이 완전히 일관돼서 우연으로 보기
+어려움. **채택 확정.** `feature_engineering.py`의 `add_engineered_features`에
+`RATE_SPECS`/`build_rate_end_lookup`/`apply_rate_progression_features` 이식 필요
+(다음 작업).
+
 ### Quantile PLE 수치형 임베딩 재검토 — 재시도 안 함으로 최종 종결 (2026-08-25)
 
 Notion 실험 로그(수연님, `담당자` 필터)에서 "TabularMLP 수치형 피처를 quantile
