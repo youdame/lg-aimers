@@ -23,6 +23,13 @@ from mlp_model import (
     train_mlp, make_bundle, embed_dim_for_cardinality,
 )
 
+# CatBoost 멀티시드 앙상블 (2026-08-25, 수연님 실측 근거: CatBoost 단독 5-seed로
+# 1007.52). MLP의 ENSEMBLE_SEEDS 앞 5개 재사용 -- 시드 값 자체는 의미 없고 그냥
+# 서로 다른 값이면 됨. half_2024 fold 검증: 개별 시드 최고(766.30)보다 앙상블이
+# +4.39 높음(770.69), 단일 최고 시드를 뽑은 우연이 아니라 진짜 앙상블 이득
+# (EXPERIMENTS.md 참고).
+CATBOOST_SEEDS = ENSEMBLE_SEEDS[:5]
+
 DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
 
 from feature_engineering import (
@@ -61,7 +68,6 @@ CATBOOST_PARAMS = dict(
     bootstrap_type="Bayesian",
     loss_function="Logloss",
     eval_metric="BrierScore",
-    random_seed=42,
     verbose=100,
 )
 
@@ -107,7 +113,7 @@ def main():
     categorical_features_cb = [c for c in tr_final.select_dtypes(include="object").columns if c != "row_id" and c in features]
     print(f"[Full Retrain] {len(train_df)}행, {len(features)}개 피처 (Track A {len(TE_RESIDUAL_COLS)}개 포함, CatBoost 전용)", flush=True)
 
-    # --- CatBoost 전체 재학습 ---
+    # --- CatBoost 전체 재학습 (5-seed 앙상블) ---
     t0 = time.time()
     cb_df = train_df.copy()
     for col in categorical_features_cb:
@@ -115,10 +121,14 @@ def main():
     train_pool = Pool(cb_df[features], cb_df[TARGET], cat_features=categorical_features_cb)
 
     catboost_iterations = CATBOOST_BEST_ITERATION + CATBOOST_ITERATION_BUFFER
-    print(f"[Full Retrain] CatBoost {catboost_iterations} iteration 고정 학습 시작...", flush=True)
-    cat_model = CatBoostClassifier(**CATBOOST_PARAMS, iterations=catboost_iterations)
-    cat_model.fit(train_pool)
-    print(f"[Full Retrain] CatBoost 완료 ({time.time()-t0:.1f}s)", flush=True)
+    print(f"[Full Retrain] CatBoost {catboost_iterations} iteration, {len(CATBOOST_SEEDS)}-seed 앙상블 학습 시작...", flush=True)
+    cat_models = []
+    for seed in CATBOOST_SEEDS:
+        cat_model = CatBoostClassifier(**CATBOOST_PARAMS, iterations=catboost_iterations, random_seed=seed)
+        cat_model.fit(train_pool)
+        cat_models.append(cat_model)
+        print(f"[Full Retrain] CatBoost seed={seed} 완료 ({time.time()-t0:.1f}s 누적)", flush=True)
+    print(f"[Full Retrain] CatBoost 전체 완료 ({time.time()-t0:.1f}s)", flush=True)
 
     # --- MLP 전체 재학습 (7-seed) ---
     t0 = time.time()
@@ -151,7 +161,7 @@ def main():
     te_source_cols = ["pitcher_id", "batter_id", "balls_before", "strikes_before",
                        "batter_hand", "num_runners_on", "inning", "season", TARGET]
     final_bundle = {
-        "catboost_model": cat_model,
+        "catboost_models": cat_models,
         "mlp_bundle": mlp_bundle,
         "meta_model": {"w_cat": META_W_CAT, "w_mlp": META_W_MLP, "intercept": META_INTERCEPT},
         "catboost_best_iteration": catboost_iterations,

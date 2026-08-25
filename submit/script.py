@@ -259,8 +259,8 @@ def main():
     features = [c for c in tr_final.columns if c not in drop_cols]
     X_test = tr_final[features]
 
-    # CatBoost 예측
-    cat_preds = bundle["catboost_model"].predict_proba(X_test)[:, 1]
+    # CatBoost 예측 (5-seed 앙상블 평균, 2026-08-25 채택)
+    cat_preds = np.mean([m.predict_proba(X_test)[:, 1] for m in bundle["catboost_models"]], axis=0)
 
     # MLP 예측 (7-seed 평균)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
