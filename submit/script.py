@@ -216,6 +216,17 @@ def apply_te_residual_features(source_df, query_df, prior):
     return query_df
 
 
+def add_pressure_flag(df):
+    """feature_engineering.py::add_pressure_flag 와 동일 (복제). CatBoost 전용 —
+    MLP num_cols에는 애초에 포함 안 됨(학습 시점에 고정된 mlp_bundle["num_cols"])."""
+    df = df.copy()
+    runner_on_3b = df["base_state"].str[2] == "3"
+    pressure = (runner_on_3b & (df["outs_before"] < 2)).astype(np.int64)
+    df["scoring_pos_pressure_flag"] = pressure
+    df["scoring_pos_pressure_li"] = pressure * df["li"]
+    return df
+
+
 def add_coarse_pitchmix(df_main, df_trm):
     """experiment_pitchmix_coarse.py::compute_coarse_pitchmix + merge 로직 복제 (추론용, 시간필터 없음).
 
@@ -274,13 +285,14 @@ def main():
         bundle = pickle.load(f)
     mlp_bundle = bundle["mlp_bundle"]
 
-    # 피처 엔지니어링: 트랙맨 merge -> 파생피처 -> coarse 구종비중 -> 시즌 진행분 -> Track A
+    # 피처 엔지니어링: 트랙맨 merge -> 파생피처 -> coarse 구종비중 -> 시즌 진행분 -> Track A -> 압박 플래그
     tr_final = process_trackman_features(df_test, df_trm)
     tr_final = add_engineered_features(tr_final, league_success_mean)
     tr_final = add_coarse_pitchmix(tr_final, df_trm)
     tr_final = apply_season_progression_features(tr_final, bundle["season_end_lookup"])
     tr_final = apply_rate_progression_features(tr_final, bundle["rate_end_lookup"])
     tr_final = apply_te_residual_features(bundle["te_source"], tr_final, bundle["te_prior"])
+    tr_final = add_pressure_flag(tr_final)
 
     drop_cols = [ID_COL, TARGET_COL]
     features = [c for c in tr_final.columns if c not in drop_cols]

@@ -39,6 +39,7 @@ DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.i
 from feature_engineering import (
     process_trackman_features_safe, add_engineered_features,
     build_season_end_lookup, build_rate_end_lookup, apply_te_residual_features, TE_RESIDUAL_COLS,
+    add_pressure_flag, PRESSURE_FLAG_COLS,
 )
 from experiment_pitchmix_coarse import compute_coarse_pitchmix, COARSE_COLS
 
@@ -115,9 +116,13 @@ def main():
     te_source = train_df.copy()
     train_df = apply_te_residual_features(te_source, train_df, te_prior)
 
+    # 득점권 압박 플래그(이 세션 자체 고안, CatBoost 전용): 두 fold 다 플러스
+    # (+2.49/+1.40) 확인, MLP는 안 태움(Track A와 동일 라우팅). EXPERIMENTS.md 참고.
+    train_df = add_pressure_flag(train_df)
+
     drop_cols = ["row_id", TARGET]
     features = [c for c in train_df.columns if c not in drop_cols]
-    num_cols = [c for c in features if c not in CAT_COLS and c not in TE_RESIDUAL_COLS]
+    num_cols = [c for c in features if c not in CAT_COLS and c not in TE_RESIDUAL_COLS and c not in PRESSURE_FLAG_COLS]
     categorical_features_cb = [c for c in tr_final.select_dtypes(include="object").columns if c != "row_id" and c in features]
     print(f"[Full Retrain] {len(train_df)}행, {len(features)}개 피처 (Track A {len(TE_RESIDUAL_COLS)}개 포함, CatBoost 전용)", flush=True)
 

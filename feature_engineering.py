@@ -148,6 +148,22 @@ def apply_rate_progression_features(df, lookup):
     return df
 
 
+PRESSURE_FLAG_COLS = ["scoring_pos_pressure_flag", "scoring_pos_pressure_li"]
+
+
+def add_pressure_flag(df):
+    """득점권(3루주자) + 2아웃 미만 압박 플래그 2개 (2026-08-25 밤, 이 세션 자체 고안,
+    EXPERIMENTS.md §7 참고). CatBoost 전용 — 두 fold 다 플러스(+2.49/+1.40, 평균
+    +1.94) 확인됐지만 CatBoost 시드 노이즈(±4.76 수준) 대비 크기가 작아 MLP까지
+    태울 근거는 아직 없음. Track A와 동일하게 MLP num_cols에서는 제외."""
+    df = df.copy()
+    runner_on_3b = df["base_state"].str[2] == "3"
+    pressure = (runner_on_3b & (df["outs_before"] < 2)).astype(np.int64)
+    df["scoring_pos_pressure_flag"] = pressure
+    df["scoring_pos_pressure_li"] = pressure * df["li"]
+    return df
+
+
 def add_engineered_features(df, league_success_mean):
     """asof_* 및 카운트 정보를 조합한 파생 피처를 추가합니다.
 
