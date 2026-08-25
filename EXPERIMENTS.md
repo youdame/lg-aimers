@@ -785,13 +785,41 @@ FM 표준 O(n·k) 계산). 실행 중(48분, 역시 무출력) **팀원이 DeepF
 CatBoost 멀티시드 실험(`experiment_catboost_multiseed.py`) 끝나는 대로 1번부터
 순서대로 진행 예정.
 
+### Quantile PLE 수치형 임베딩 재검토 — 재시도 안 함으로 최종 종결 (2026-08-25)
+
+Notion 실험 로그(수연님, `담당자` 필터)에서 "TabularMLP 수치형 피처를 quantile
+기반 piecewise-linear 인코딩(Gorishniy et al.)으로 바꾸면 periodic보다 훨씬 좋다"는
+결과(n_bins=16~24, 7-seed paired 평균 +50~56, 7/7 승률)를 발견 → 창현님 저장소
+`EXPERIMENTS.md` §15에서 같은 결론을 실제 리더보드로 재확인(로컬 879.34, 실전
+957.80417, 트랙맨 완전 제거+F1 필터+CatBoost 재튜닝까지 얹어 실전 971)한 걸 확인해서
+우리 MLP에도 이식할지 검토했음.
+
+**근데 우리도 이미 해봤던 거였음**: 2026-08-16에 `experiment_quantile_embed.py`로
+동일 기법(Gorishniy PLE) 도입해서 로컬 2023/2024 두 시즌 다 개선 확인 후 채택했다가,
+실전 제출에서 879.54(직전 최고 968.15보다 대폭 낮음)가 나와 원인 격리 중 하나로
+의심받았던 항목(§ 실전 회귀 디버깅 진행상황, 위 §0 참고). quantile만 빼고
+재제출했을 때 862.16으로 더 낮아져 "quantile 단독 범인" 가설 자체는 기각됐지만
+(alpha/same_hand 제외 테스트도 다 862~880 범위를 못 벗어나 진짜 원인은 끝내 미상),
+별도로 `experiment_simulate_2025_trackman.py`가 **quantile PLE가 트랙맨 상수
+fallback(2025 실전에서 100% 발생) 상황에 StandardScaler보다 4배 가까이 취약**하다는
+구조적 근거를 남김 — 학습 시 고정한 quantile bin 경계에 트랙맨 fallback 상수가
+몰리면서 퇴화(degenerate) 입력이 되는 메커니즘.
+
+**결론: 재시도 안 함.** 창현님 저장소가 quantile PLE로 성공한 건 트랙맨을 완전히
+제거한 뒤였음(§17)이라는 점이 우리 자체 취약성 발견과 정확히 들어맞음 — 우리는
+지금도 coarse pitchmix로 트랙맨을 쓰고 있어서, quantile을 다시 넣으면 예전에 실제로
+겪은 사고와 똑같은 조건(트랙맨 유지 + quantile)을 재현하는 셈. 트랙맨을 통째로 뺄
+계획이 없는 한 이 후보는 닫힌 것으로 취급. (재검토하게 될 경우: 트랙맨 유래 컬럼만
+StandardScaler로 남기고 나머지 수치형에만 quantile을 적용하는 절충안이 유일하게
+남은 옵션.)
+
 ### 2026-08-25 세션 요약
 
 | | |
 |---|---|
 | 확정 | 시즌진행분+Track A → 실전 1059.72 (968.15 대비 +91.57) |
 | 대기 | 로지스틱 메타모델(+14.55 로컬 확인, `submit_final_v8_logistic_meta.zip` 제출 대기) |
-| 기각 | ball/strike 시즌분해(4fold 중 3승이지만 half_2024/expand_2023은 방향 갈림), EBM/FM/DeepFM/FFM(팀원이 이미 시도해 효과 없음 확인), 트랙맨 반복성 std(아래 상세) |
+| 기각 | ball/strike 시즌분해(4fold 중 3승이지만 half_2024/expand_2023은 방향 갈림), EBM/FM/DeepFM/FFM(팀원이 이미 시도해 효과 없음 확인), 트랙맨 반복성 std(아래 상세), quantile PLE 재도입(과거 실전 사고 재현 위험, 위 상세) |
 | 미완료 | CatBoost/MLP 하이퍼파라미터 재탐색(다음 세션) |
 
 ## 관련 파일
