@@ -116,13 +116,14 @@ def main():
     te_source = train_df.copy()
     train_df = apply_te_residual_features(te_source, train_df, te_prior)
 
-    # 득점권 압박 플래그(이 세션 자체 고안, CatBoost 전용): 두 fold 다 플러스
-    # (+2.49/+1.40) 확인, MLP는 안 태움(Track A와 동일 라우팅). EXPERIMENTS.md 참고.
-    train_df = add_pressure_flag(train_df)
+    # 득점권 압박 플래그: 두 fold 다 플러스(+2.49/+1.40)였지만 CatBoost 시드 노이즈
+    # (±4.76)에 근접한 약한 신호라 최종적으로 오늘 밤 번들에서 제외하기로 함
+    # (유담님 판단, 2026-08-25 밤). 함수는 남겨둠(feature_engineering.py 참고),
+    # 호출만 안 함 -- 나중에 추가 fold로 재검증하고 싶으면 이 두 줄만 살리면 됨.
 
     drop_cols = ["row_id", TARGET]
     features = [c for c in train_df.columns if c not in drop_cols]
-    num_cols = [c for c in features if c not in CAT_COLS and c not in TE_RESIDUAL_COLS and c not in PRESSURE_FLAG_COLS]
+    num_cols = [c for c in features if c not in CAT_COLS and c not in TE_RESIDUAL_COLS]
     categorical_features_cb = [c for c in tr_final.select_dtypes(include="object").columns if c != "row_id" and c in features]
     print(f"[Full Retrain] {len(train_df)}행, {len(features)}개 피처 (Track A {len(TE_RESIDUAL_COLS)}개 포함, CatBoost 전용)", flush=True)
 

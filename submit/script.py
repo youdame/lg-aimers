@@ -292,7 +292,7 @@ def main():
     tr_final = apply_season_progression_features(tr_final, bundle["season_end_lookup"])
     tr_final = apply_rate_progression_features(tr_final, bundle["rate_end_lookup"])
     tr_final = apply_te_residual_features(bundle["te_source"], tr_final, bundle["te_prior"])
-    tr_final = add_pressure_flag(tr_final)
+    # 득점권 압박 플래그는 근거가 약해서(노이즈 수준) 최종적으로 제외 -- 함수는 남겨둠
 
     drop_cols = [ID_COL, TARGET_COL]
     features = [c for c in tr_final.columns if c not in drop_cols]
