@@ -34,7 +34,7 @@ DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.i
 
 from feature_engineering import (
     process_trackman_features_safe, add_engineered_features,
-    build_season_end_lookup, apply_te_residual_features, TE_RESIDUAL_COLS,
+    build_season_end_lookup, build_rate_end_lookup, apply_te_residual_features, TE_RESIDUAL_COLS,
 )
 from experiment_pitchmix_coarse import compute_coarse_pitchmix, COARSE_COLS
 
@@ -85,6 +85,10 @@ def main():
     # 자신으로는 계산 불가하므로 train.csv 전체로 1회 계산). add_engineered_features가
     # 내부적으로 동일 함수를 호출해 실제 적용도 같이 수행함.
     season_end_lookup = build_season_end_lookup(train_df)
+    # reverse_rate 시즌 진행분(2026-08-25 채택) lookup — season_end_lookup과 동일한
+    # 이유로 정적 계산·번들 동봉 필요 (submit/script.py가 test.csv 자기 자신으로는
+    # 만들 수 없음).
+    rate_end_lookup = build_rate_end_lookup(train_df)
     league_success_mean = train_df[TARGET].mean()
     train_df = add_engineered_features(train_df, league_success_mean)
 
@@ -120,15 +124,34 @@ def main():
         cb_df[col] = cb_df[col].astype(str).fillna("missing")
     train_pool = Pool(cb_df[features], cb_df[TARGET], cat_features=categorical_features_cb)
 
+    # 체크포인트: 재학습이 3~4시간+ 걸리는데 중간에(랩탑 잠자기/네트워크 등) 끊기면
+    # 처음부터 다시 돌려야 하는 걸 막기 위해, CatBoost 완료 직후 + MLP는 시드 1개
+    # 끝날 때마다 저장. 재실행 시 이미 끝난 부분은 건너뜀 (2026-08-25 추가).
+    CHECKPOINT_PATH = "./submit/model/_retrain_checkpoint.pkl"
+    os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+    checkpoint = {}
+    if os.path.exists(CHECKPOINT_PATH):
+        with open(CHECKPOINT_PATH, "rb") as f:
+            checkpoint = pickle.load(f)
+        print(f"[체크포인트] {CHECKPOINT_PATH} 발견, 이어서 진행 시도", flush=True)
+
     catboost_iterations = CATBOOST_BEST_ITERATION + CATBOOST_ITERATION_BUFFER
-    print(f"[Full Retrain] CatBoost {catboost_iterations} iteration, {len(CATBOOST_SEEDS)}-seed 앙상블 학습 시작...", flush=True)
-    cat_models = []
-    for seed in CATBOOST_SEEDS:
-        cat_model = CatBoostClassifier(**CATBOOST_PARAMS, iterations=catboost_iterations, random_seed=seed)
-        cat_model.fit(train_pool)
-        cat_models.append(cat_model)
-        print(f"[Full Retrain] CatBoost seed={seed} 완료 ({time.time()-t0:.1f}s 누적)", flush=True)
-    print(f"[Full Retrain] CatBoost 전체 완료 ({time.time()-t0:.1f}s)", flush=True)
+    if checkpoint.get("cat_models") and len(checkpoint["cat_models"]) == len(CATBOOST_SEEDS):
+        cat_models = checkpoint["cat_models"]
+        print(f"[체크포인트] CatBoost {len(cat_models)}개 모델 재사용, 학습 건너뜀", flush=True)
+    else:
+        print(f"[Full Retrain] CatBoost {catboost_iterations} iteration, {len(CATBOOST_SEEDS)}-seed 앙상블 학습 시작...", flush=True)
+        cat_models = []
+        for seed in CATBOOST_SEEDS:
+            cat_model = CatBoostClassifier(**CATBOOST_PARAMS, iterations=catboost_iterations, random_seed=seed)
+            cat_model.fit(train_pool)
+            cat_models.append(cat_model)
+            print(f"[Full Retrain] CatBoost seed={seed} 완료 ({time.time()-t0:.1f}s 누적)", flush=True)
+        print(f"[Full Retrain] CatBoost 전체 완료 ({time.time()-t0:.1f}s)", flush=True)
+        checkpoint["cat_models"] = cat_models
+        with open(CHECKPOINT_PATH, "wb") as f:
+            pickle.dump(checkpoint, f)
+        print(f"[체크포인트] CatBoost {len(cat_models)}개 모델 저장 완료", flush=True)
 
     # --- MLP 전체 재학습 (7-seed) ---
     t0 = time.time()
@@ -141,8 +164,13 @@ def main():
     embed_dims = [embed_dim_for_cardinality(d) for d in cat_dims]
 
     full_epochs = DEFAULT_FULL_RETRAIN_EPOCHS + FULL_RETRAIN_EPOCH_BUFFER
-    full_members = []
+    full_members = checkpoint.get("mlp_members", [])
+    done_seeds = {m["seed"] for m in full_members}
+    if done_seeds:
+        print(f"[체크포인트] MLP 시드 {sorted(done_seeds)} 재사용, 나머지만 학습", flush=True)
     for seed in ENSEMBLE_SEEDS:
+        if seed in done_seeds:
+            continue
         model, _ = train_mlp(
             X_full_cat, X_full_num, y_full,
             cat_dims=cat_dims, num_numeric_feats=len(num_cols), embed_dims=embed_dims,
@@ -154,6 +182,9 @@ def main():
             "seed": seed,
         })
         print(f"[Full Retrain] MLP seed={seed} {full_epochs}epoch 학습 완료 ({time.time()-t0:.1f}s 누적)", flush=True)
+        checkpoint["mlp_members"] = full_members
+        with open(CHECKPOINT_PATH, "wb") as f:
+            pickle.dump(checkpoint, f)
 
     mlp_bundle = make_bundle(full_members, CAT_COLS, num_cols, cat_dims, embed_dims, cat_encoder, num_imputer, num_scaler)
     print(f"[Full Retrain] MLP 전체 완료 ({time.time()-t0:.1f}s)", flush=True)
@@ -167,6 +198,7 @@ def main():
         "catboost_best_iteration": catboost_iterations,
         "f1_filter_applied": True,
         "season_end_lookup": season_end_lookup,
+        "rate_end_lookup": rate_end_lookup,
         "te_source": te_source[te_source_cols].copy(),
         "te_prior": te_prior,
     }

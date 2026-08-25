@@ -136,6 +136,32 @@ def apply_season_progression_features(df, lookup):
     return df
 
 
+RATE_PROGRESSION_SPECS = [
+    ("pitcher_reverse", "pitcher_id", "asof_pitcher_n", "asof_pitcher_reverse_rate"),
+]
+
+
+def apply_rate_progression_features(df, lookup):
+    """feature_engineering.py::apply_rate_progression_features 와 동일 (복제). lookup은
+    model/final_retained_model.pkl에 정적 동봉된 것을 그대로 씀 — test.csv 자기
+    자신으로는 lookup을 만들 수 없음(평가 데이터 독립 예측 원칙)."""
+    df = df.copy()
+    for name, id_col, n_col, rate_col in RATE_PROGRESSION_SPECS:
+        lut = lookup.loc[lookup["name"] == name, ["id", "season", "end_n", "end_rate"]]
+        merged = df[[id_col, "season"]].merge(lut, left_on=[id_col, "season"], right_on=["id", "season"], how="left")
+        pre_n = merged["end_n"].fillna(0).values
+        pre_count = (merged["end_n"] * merged["end_rate"]).round().fillna(0).values
+        cum_n = df[n_col].values
+        cum_count = np.round(df[n_col].values * df[rate_col].values)
+        season_n = np.maximum(cum_n - pre_n, 0)
+        season_count = np.maximum(cum_count - pre_count, 0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            season_rate = np.where(season_n > 0, season_count / season_n, np.nan)
+        df[f"{name}_season_rate"] = season_rate
+        df[f"{name}_season_rate_gap"] = season_rate - df[rate_col].values
+    return df
+
+
 TE_K_SMOOTH = 200
 TE_AXES = [
     ("te_p_cnt", ["pitcher_id", "balls_before", "strikes_before"], "p_main"),
@@ -253,6 +279,7 @@ def main():
     tr_final = add_engineered_features(tr_final, league_success_mean)
     tr_final = add_coarse_pitchmix(tr_final, df_trm)
     tr_final = apply_season_progression_features(tr_final, bundle["season_end_lookup"])
+    tr_final = apply_rate_progression_features(tr_final, bundle["rate_end_lookup"])
     tr_final = apply_te_residual_features(bundle["te_source"], tr_final, bundle["te_prior"])
 
     drop_cols = [ID_COL, TARGET_COL]

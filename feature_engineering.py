@@ -105,6 +105,49 @@ def apply_season_progression_features(df, lookup):
     return df
 
 
+RATE_PROGRESSION_SPECS = [
+    ("pitcher_reverse", "pitcher_id", "asof_pitcher_n", "asof_pitcher_reverse_rate"),
+]
+
+
+def build_rate_end_lookup(df):
+    """asof_pitcher_reverse_rate의 시즌 진행분 lookup (build_season_end_lookup과 동일
+    구조, 2026-08-25 채택 — EXPERIMENTS.md §7 참고). control_success 행 단위 라벨이
+    없어(reverse_rate는 성공/실패가 아니라 별도 판정 지표) 시즌 마지막 투구 보정은
+    생략한 근사치 — season_end 테이블에 "end_success" 대응 컬럼이 없다."""
+    tables = []
+    for name, id_col, n_col, rate_col in RATE_PROGRESSION_SPECS:
+        idx = df.groupby([id_col, "season"])[n_col].idxmax()
+        season_end = df.loc[idx, [id_col, "season", n_col, rate_col]].copy()
+        season_end.columns = ["id", "season", "end_n", "end_rate"]
+        season_end["season"] = season_end["season"] + 1
+        season_end.insert(0, "name", name)
+        tables.append(season_end)
+    return pd.concat(tables, ignore_index=True)
+
+
+def apply_rate_progression_features(df, lookup):
+    """asof_pitcher_reverse_rate 시즌 분해 2개(season_rate/season_rate_gap). 근사 방식
+    (마지막 투구 보정 없음)이지만 두 fold·세 지표(CatBoost/MLP/Blend) 전부 같은 방향
+    개선 확인(평균 +17.75, EXPERIMENTS.md §7 참고). trackman 무관, df 자신의 다른
+    행이나 control_success에 의존하지 않아 test.csv에도 안전."""
+    df = df.copy()
+    for name, id_col, n_col, rate_col in RATE_PROGRESSION_SPECS:
+        lut = lookup.loc[lookup["name"] == name, ["id", "season", "end_n", "end_rate"]]
+        merged = df[[id_col, "season"]].merge(lut, left_on=[id_col, "season"], right_on=["id", "season"], how="left")
+        pre_n = merged["end_n"].fillna(0).values
+        pre_count = (merged["end_n"] * merged["end_rate"]).round().fillna(0).values
+        cum_n = df[n_col].values
+        cum_count = np.round(df[n_col].values * df[rate_col].values)
+        season_n = np.maximum(cum_n - pre_n, 0)
+        season_count = np.maximum(cum_count - pre_count, 0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            season_rate = np.where(season_n > 0, season_count / season_n, np.nan)
+        df[f"{name}_season_rate"] = season_rate
+        df[f"{name}_season_rate_gap"] = season_rate - df[rate_col].values
+    return df
+
+
 def add_engineered_features(df, league_success_mean):
     """asof_* 및 카운트 정보를 조합한 파생 피처를 추가합니다.
 
@@ -112,6 +155,7 @@ def add_engineered_features(df, league_success_mean):
     진행분 피처가 lookup을 df 자신으로부터 만들기 때문."""
     df = df.copy()
     df = apply_season_progression_features(df, build_season_end_lookup(df))
+    df = apply_rate_progression_features(df, build_rate_end_lookup(df))
 
     df['pitcher_recent1_gap'] = df['asof_pitcher_prev1_game_success_rate'] - df['asof_pitcher_success_rate']
     df['pitcher_recent3_gap'] = df['asof_pitcher_prev3_game_success_rate'] - df['asof_pitcher_success_rate']
