@@ -907,10 +907,22 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
 
 0. **[완료]** `submit_0825.zip`(v7+메타모델만, reverse_rate/멀티시드 등 미포함) 제출
    → **실전 1085.24**, 1059.72 대비 +25.52. 신규 최고 기록.
-1. **[진행 중, 2번째 시도]** hand_matchup / no_both, CatBoost 전용 단일시드 빠른 검증
-   (`experiment_domain_handmatchup_nobos.py`, 백그라운드). 1차 시도는 중간에 실수로
-   kill되어 half_2024 baseline(769.10)/hand_matchup(768.12, -0.98) 2개만 나오고
-   중단됨 — 처음부터 재실행 중.
+1. **[완료, 기각]** hand_matchup / no_both, CatBoost 전용 단일시드 검증
+   (`experiment_domain_handmatchup_nobos.py`):
+
+   | | half_2024 | expand_2023 | 평균 |
+   |---|---|---|---|
+   | baseline | 769.10 | 822.28 | 795.69 |
+   | hand_matchup | 768.12 (-0.98) | 816.74 (-5.54) | 792.43 (-3.26) |
+   | no_both | 774.92 (+5.82) | 815.08 (-7.20) | 795.00 (-0.69) |
+   | 둘 다 | 768.34 (-0.76) | 824.82 (+2.54) | 796.58 (+0.89) |
+
+   hand_matchup은 두 fold 다 마이너스로 명확히 기각. no_both는 fold 간 방향이
+   갈림(+5.82/-7.20, ball/strike와 같은 패턴)이라 기각. 둘 다 합쳐도 노이즈
+   수준(+0.89). 수연님 파이프라인(CatBoost 단독, Track A/reverse_rate 없는 더
+   단순한 피처셋)에서 통했던 게 우리 파이프라인(이미 Track A+reverse_rate로
+   풍부한 피처셋)에서는 안 먹힘 — 겹치는 신호를 다른 피처가 이미 잡고 있을
+   가능성. **오늘 밤 번들 미포함 확정, 재시도 불필요.**
 2. **[대기]** 플래툰 스플릿 / 압박 플래그, CatBoost 전용 단일시드 빠른 검증
    (`experiment_domain_platoon_pressure_fast.py`, 1번 끝나면 이어서)
 3. **[판단]** 위 후보들 — CatBoost에서 좋으면 그걸로 채택 확정, MLP num_cols엔
