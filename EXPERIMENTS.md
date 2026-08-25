@@ -416,6 +416,26 @@ PLE 반영 상태 기준, 2026-08-16)**:
     mean+std를 이미 계산하고 있지만 season 조인이라 실전에서 죽어있었던 것과 대조적.
     시도할 것: match_cols를 핵심 6개로 좁히고 season 대신 `season-1`로 조인하는 버전을
     만들어서 2023+2024 이중검증 → 도움되면 std 피처만 우선 채택.
+
+    **실전 검증 확인됨(2026-08-25 밤, 수연님 레포 `github.com/lg-first-penguin/sooyun`
+    직접 확인)** — 위에서 "시도할 것"으로만 남겨뒀던 게 실제로 구현·검증까지 끝난
+    상태였음. `script.py`에서 정확히 이 6키+season-1 조인으로 std5(구속/회전수/IVB/
+    HB/extension 표준편차)를 만들고, 여기에 **gap4**(패스트볼 vs 변화구 평균값
+    차이 — speed/ivb/hbreak/spin, 순수 평균은 기각됐지만 "구종 간 격차"는 살아남음)
+    까지 추가해서 77피처 세트로 **CatBoost 단독 실전 1007.52** 확정. 우리 pending
+    to-do가 팀원 손으로 이미 실전 검증까지 끝난 셈 — 우리도 포팅할 가치 높음(다음
+    세션 우선순위 상향). 같이 확인된 부가 발견 2개:
+    - **hand_matchup**: `same_hand`(이진) 대신 손잡이 조합 4종 범주형(`pitcher_hand_
+      batter_hand`) 하나로. 구현 비용 거의 0, 같이 테스트해볼만.
+    - **no_both**: `pitcher_id`/`batter_id`를 시즌진행분 lookup 키로만 쓰고 최종
+      CatBoost 피처에서는 제외 — "CV 전 구간 일관 개선"이라고 README에 명시. 구현
+      비용 거의 0.
+    - (참고, 우리한텐 해당 안 됨) 수연님 `script.py`는 test.csv 시점에 train.csv를
+      매번 원본부터 재계산하는 구조라 `groupby(...).idxmax()`가 평가 서버 row_id
+      dtype에서 실제로 크래시난 전례가 있어 `drop_duplicates(keep="last")`로 우회함.
+      우리는 lookup을 재학습 시점에 미리 만들어 정적 pickle로 번들에 넣는 구조라
+      `submit/script.py`엔 `idxmax()`가 아예 없음(feature_engineering.py엔 있지만
+      로컬 재학습에서만 실행됨) — 확인 결과 우리는 이 크래시 위험 없음.
 15. **로컬 검증 프로토콜 통일 (2026-08-23 회의 결정, 진행 중).** 지금까지 쓰던
     `season==2024` 단일 홀드아웃 / 2023+2024 평균 방식을 전부 아래 방식으로 대체:
     - Fold A: 2019 ~ 2024/06 학습 → 2024/07~10 검증 (시즌 도중 cutoff)
