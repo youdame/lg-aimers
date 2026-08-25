@@ -802,7 +802,26 @@ CatBoost 멀티시드 실험(`experiment_catboost_multiseed.py`) 끝나는 대�
 fold 간 방향 갈림)와 달리 reverse_rate는 방향이 완전히 일관돼서 우연으로 보기
 어려움. **채택 확정.** `feature_engineering.py`의 `add_engineered_features`에
 `RATE_SPECS`/`build_rate_end_lookup`/`apply_rate_progression_features` 이식 필요
-(다음 작업).
+(다음 작업). **이식 완료(2026-08-25 밤)** — `feature_engineering.py`/
+`full_retrain_blend_f1.py`/`submit/script.py` 전부 반영, `rate_end_lookup`도
+모델 번들에 정적 동봉되도록 추가.
+
+### CatBoost 멀티시드 두 번째 fold(expand_2023) 재검증 — 비교 기준 정정 후 채택 유지 (2026-08-25)
+
+`experiment_catboost_multiseed.py`를 두 fold 다 돌도록 고쳐서 재실행:
+
+| | seed=42(기존 프로덕션) | 5개 시드 평균 | 5-seed 앙상블 | 앙상블 vs seed=42 |
+|---|---|---|---|---|
+| half_2024 | 765.68 | 762.78 | 770.69 | **+5.01** |
+| expand_2023 | 792.94 | 795.12 | 803.24 | **+10.30** |
+
+스크립트가 처음 출력한 비교("개별 시드 중 최고 대비")로는 half_2024 +4.38인데
+expand_2023은 **-1.91**로 나와서 fold 간 방향이 갈리는 것처럼 보였음 — 하지만
+"개별 시드 중 최고"는 5개를 다 돌려본 뒤에야 알 수 있는 사후적 기준이라(hindsight
+bias), 실전에서 시드 하나만 미리 골라 쓰는 상황과 비교 대상이 안 맞음. 실제
+프로덕션에 지금까지 쓰던 고정 시드(42) 또는 개별 시드 평균과 비교하면 **두 fold
+모두 앙상블이 확실히 이김** — 방향이 갈리는 문제가 아니라 비교 기준이 잘못됐던
+것. **채택 유지, 재확인 완료.**
 
 ### Quantile PLE 수치형 임베딩 재검토 — 재시도 안 함으로 최종 종결 (2026-08-25)
 
@@ -843,9 +862,8 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
 | | |
 |---|---|
 | 확정 | 시즌진행분+Track A → 실전 1059.72 (968.15 대비 +91.57) |
-| 코드 반영, 재학습 대기 | CatBoost 5-seed 앙상블(half_2024 +4.39 확인, expand_2023 미확인) / 2-입력 로지스틱 메타모델(+14.55 로컬) |
-| 진행 중 | reverse_rate 시즌분해(백그라운드 실행 중, 100분+) |
-| 대기(순서대로) | 신뢰도 보정 sqrt(n/(n+100)) 로컬 검증 → 플래툰 스플릿/득점권 압박 피처 → CatBoost 멀티시드 2번째 fold 재검증 → quantile PLE 제출 없이 로컬 전용 재검증 |
+| 오늘 밤 제출 번들(코드 반영 완료) | CatBoost 5-seed 앙상블(두 fold 다 확인, seed=42 대비 +5.01/+10.30) + 2-입력 로지스틱 메타모델(+14.55 로컬) + reverse_rate 시즌분해(+17.75 로컬 평균) — 재학습만 남음 |
+| 대기(참고용, 오늘 제출엔 미포함) | 플래툰 스플릿/득점권 압박 피처(백그라운드 실행 중) → quantile PLE 제출 없이 로컬 전용 재검증 → 신뢰도 보정 sqrt(n/(n+100)) |
 | 기각 | ball/strike 시즌분해(4fold 중 3승이지만 half_2024/expand_2023은 방향 갈림), EBM/FM/DeepFM/FFM(팀원이 이미 시도해 효과 없음 확인), 트랙맨 반복성 std(아래 상세) |
 | 보류(제출 안 함, 로컬만 재검증 예정) | quantile PLE 재도입 — 과거 실전 사고의 "범인"이라는 근거는 아니었음(오히려 무죄 쪽 증거), 대신 fallback 취약성 시뮬레이션+창현님 저장소 교차비교라는 약한 정황 근거로 보류 중(위 상세) |
 | 미완료 | CatBoost/MLP 하이퍼파라미터 재탐색(다음 세션) |
