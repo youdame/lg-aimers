@@ -895,14 +895,37 @@ hand_matchup/no_both 등 다른 후보를 빠르게 회전시키려고 오늘 �
 검증 끝난 확정 채택 항목이라, **오늘 밤 마지막(진짜 제출용) 재학습 실행 직전에
 `ENSEMBLE_SEEDS[:5]`로 반드시 되돌릴 것.** 코드에도 TODO 주석 남겨둠.
 
-### 2026-08-25 다음 계획 (우선순위 순)
+### 2026-08-25 다음 계획 — 최신판 (밤 8시반 기준, 이전 버전 대체)
 
-1. **[진행 중]** reverse_rate 시즌분해 완료 대기 (`experiment_season_progression_reverse.py`, 백그라운드) — 끝나는 대로 775.45 기준선 대비 채택/기각 판정
-2. **[대기]** 표본 수 신뢰도 보정 로컬 검증 (`experiment_season_progression_confidence.py`, 작성 완료) — `sqrt(season_n/(season_n+100))`를 기존 시즌진행분의 `_season_rate_gap`에만 적용, reverse_rate와 격리해서 순수 효과 확인
-3. **[대기]** 도메인 피처 후보 나머지 2개 — 타자×투수손 플래툰 스플릿(Track A 축 추가), 3루주자+2아웃 미만 압박 플래그. 여유 되면 순서대로
-4. **[대기]** CatBoost 5-seed 앙상블 `expand_2023` fold 재검증 — 지금까지 `half_2024` 한 fold만 확인됨, 두 번째 fold에서도 재현되는지 확인 필요(재학습 전에)
-5. **[대기, 제출 없음]** Quantile PLE를 지금 피처셋(시즌진행분+Track A+coarse pitchmix) 위에 얹어 로컬 7-seed 페어드 재검증만 수행. 확실히 나쁘면(다수 시드 패) 완전 종결, 애매/좋으면 그때 재논의 — 절대 이걸로 제출은 안 함
-6. **[계획]** 위에서 통과한 항목들 + 이미 코드 반영된 멀티시드/메타모델을 전부 합쳐 로컬 2-fold(half_2024/expand_2023) 재검증 → `full_retrain_blend_f1.py` 전체 재학습 → 5행 스모크테스트 → zip 패키징(짧은 파일명) → 제출
+**오늘 밤 (우선순위 순)**
+
+1. **[진행 중]** hand_matchup / no_both, CatBoost 전용 단일시드 빠른 검증
+   (`experiment_domain_handmatchup_nobos.py`, 백그라운드, ~55~65분 예상)
+2. **[대기]** 플래툰 스플릿 / 압박 플래그, CatBoost 전용 단일시드 빠른 검증
+   (`experiment_domain_platoon_pressure_fast.py`, 1번 끝나면 이어서)
+3. **[판단]** 위 4개 후보 — **CatBoost에서 좋으면 그걸로 채택 확정**, MLP num_cols엔
+   안 넣고 CatBoost 피처 목록에만 추가(Track A와 동일 라우팅 패턴). MLP 적합성은
+   몰라도 됨 — 안 먹이니까 상관없음. 채택된 것들 `feature_engineering.py`/
+   `full_retrain_blend_f1.py`/`submit/script.py`에 이식.
+4. **[필수]** `full_retrain_blend_f1.py`의 `CATBOOST_SEEDS`를 `ENSEMBLE_SEEDS[:5]`로
+   복원 (지금 `[:1]`로 임시 하향된 상태, 위쪽 경고 참고)
+5. **[최종]** 전체 재학습 → 5행 스모크테스트 → zip 패키징(짧은 파일명) → 제출
+
+**내일 (오늘 밤 안 끝난 것들 + 원래 있던 백로그)**
+
+1. no_both/압박 플래그(그리고 궁금하면 hand_matchup/플래툰도)가 **MLP에도** 도움되는지
+   확인 — 오늘 밤은 CatBoost 전용 라우팅으로 확정하고 넘어가므로, 이건 순수 보너스
+   탐색(안 하면 손해 없음)
+2. Season-1 트랙맨 조인(std5+gap4, 수연님 레포 확인됨) — 아직 우리 코드로 구현 자체를
+   안 함, 우선순위 가장 높은 신규 후보
+3. Quantile PLE 로컬 전용 재검증 (제출 없이 확인만, 지금 피처셋 위에)
+4. 표본 수 신뢰도 보정 로컬 검증 (`experiment_season_progression_confidence.py`,
+   작성 완료·미실행) — `sqrt(season_n/(season_n+100))`를 시즌진행분 `_season_rate_gap`에
+   적용
+5. CatBoost/MLP 하이퍼파라미터 재탐색 (`tune_catboost_v2.py`, Optuna 18trial 착수했다
+   중단된 상태)
+6. 오늘 밤 제출 결과 확인 후, 예상과 다르면(특히 로컬 대비 실전이 많이 낮으면) 아껴둔
+   제출권으로 원인 분리(reverse_rate만 빼고 재제출 등)
 
 ## 관련 파일
 
