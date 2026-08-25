@@ -29,10 +29,10 @@ from mlp_model import (
 # +5.01 / expand_2023 +10.30 (EXPERIMENTS.md 참고). **채택 확정, 효과 검증 끝남.**
 #
 # !!! 임시로 1-seed로 낮춰둔 상태 (2026-08-25 밤) !!! 5-seed는 재학습에 ~45분을
-# 추가로 먹어서, 시간 압박(10시 전 제출 목표) 때문에 오늘 밤 제출용 재학습에도
-# 1-seed로 감(유담님 확정, 2026-08-25 밤). 멀티시드 자체는 여전히 유효한 채택
-# 항목 -- 5-seed 복원은 다음 제출(내일)로 이월. EXPERIMENTS.md 참고.
-CATBOOST_SEEDS = ENSEMBLE_SEEDS[:1]  # NEXT: ENSEMBLE_SEEDS[:5]로 복원해서 다음 제출에 반영
+# 추가로 먹지만, 메타모델 단독 실전 결과(로컬 +14.55 -> 실전 +25.52, 1.75배)를 보고
+# 나머지 검증된 개선사항도 실전에서 더 크게 나올 걸로 기대해서 5-seed로 다시 감
+# (유담님 재확정, 2026-08-25 밤 9시 직전 -- 한 번 1-seed로 내렸다가 다시 복원).
+CATBOOST_SEEDS = ENSEMBLE_SEEDS[:5]
 
 DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
 
