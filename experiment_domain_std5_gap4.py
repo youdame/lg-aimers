@@ -32,7 +32,10 @@ def build_std5_gap4_tables(df_trm):
     """trm(전체 트랙맨 이력)에서 (season, 6키) 단위 std5/gap4 테이블을 만듦.
     train.csv 인코딩(top_bottom: T/B, hand: 1/2)에 맞춰 변환."""
     trm = df_trm.copy()
-    trm["top_bottom"] = trm["top_bottom"].map({"Top": "T", "Bottom": "B"})
+    # process_trackman_features_safe가 작업용 df의 top_bottom을 T/B 문자열에서
+    # {T:0, B:1} 정수로 이미 바꿔놓기 때문에, 여기서도 같은 정수 인코딩으로 맞춘다
+    # (버그 수정: 원래 "T"/"B" 문자열로 매핑했다가 int64 vs object merge 에러 발생).
+    trm["top_bottom"] = trm["top_bottom"].map({"Top": 0, "Bottom": 1})
     trm["pitcher_hand"] = trm["pitcher_hand"].map({"Right": 2, "Left": 1})
     trm["batter_hand"] = trm["batter_hand"].map({"Right": 2, "Left": 1})
 
