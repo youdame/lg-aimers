@@ -1041,6 +1041,28 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
 결정의 강한 재확인. Track A(`te_p_bhand_res`)도 CatBoost 5위로 생존 확인. 전체
 결과는 `feature_importance_results.txt` 참고.
 
+### CatBoost/MLP 하이퍼파라미터 재탐색 v2 완료 (2026-08-26 아침, `tune_catboost_v2.py`/`tune_mlp_v2.py`)
+
+시즌진행분+Track A+reverse_rate+same_hand 전부 반영된 현재 피처셋 기준으로 재탐색
+(기존 하이퍼파라미터는 구종비중만 있던 2026-08-16 시점 값이라 최적점이 이동했을 수
+있음 — 창현님 쪽도 동일 논리로 재탐색 중).
+
+- **CatBoost**: half_2024 fold, 25trial, Optuna TPE, SQLite 체크포인트(중단 대비).
+  Best = Trial 014, **784.25 (기존 769.10 대비 +15.15)**.
+  `{depth: 7, learning_rate: 0.046773, l2_leaf_reg: 19.391490, random_strength: 8.254100,
+  bagging_temperature: 0.127747, border_count: 179, min_data_in_leaf: 1}`,
+  best_iteration=684. → `model_py311/best_catboost_hparams_v2.json`에 저장,
+  **`full_retrain_blend_f1.py`에 바로 반영함** (단일 CatBoost 결과라 노이즈가 MLP보다
+  훨씬 작아서 별도 재검증 없이 채택 — 아래 MLP와의 검증 강도 차이는 의도적).
+- **MLP**: half_2024 fold, 20trial x 2-seed 평균(트라이얼 내 시드간 최대 59점 차이
+  관측 — 2-seed 탐색 순위 자체는 노이즈가 큼). Best = Trial 009, avg_score=747.57.
+  `{hidden1: 256, hidden2: 64, dropout: 0.353362, lr: 0.006804, weight_decay: 0.023196,
+  batch_size: 2048}`. → `model_py311/best_mlp_hparams_v2.json`에 저장. **탐색 순위를
+  그대로 신뢰하지 않고**, 기존 프로덕션 하이퍼파라미터 vs 이 후보를 `verify_mlp_hparams_v2.py`로
+  ENSEMBLE_SEEDS 7개 정식 비교 진행 중 — 신규가 이겨야만 채택(진행 상황은 아래 갱신 예정).
+- `full_retrain_blend_f1.py`: `CATBOOST_SEEDS`를 최종 통합 재학습 기준 5-seed로 복원
+  (`[:1]`은 어젯밤 배터리 위기 때 임시 조치였음).
+
 ## 관련 파일
 
 - `feature_engineering.py`: 트랙맨 조인 + asof 파생피처 (창현님 원작)

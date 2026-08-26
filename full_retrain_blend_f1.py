@@ -28,11 +28,8 @@ from mlp_model import (
 # 서로 다른 값이면 됨. 두 fold 다 재확인 완료: seed=42 대비 앙상블이 half_2024
 # +5.01 / expand_2023 +10.30 (EXPERIMENTS.md 참고). **채택 확정, 효과 검증 끝남.**
 #
-# !!! 임시로 1-seed로 낮춰둔 상태 (2026-08-25 밤) !!! 5-seed는 재학습에 ~45분을
-# 추가로 먹음. 밤 9시엔 5-seed로 복원했었는데, 밤 10시반 배터리 이슈(7%, 충전 속도가
-# CPU 부하를 못 따라감) + "앞으로 1시간 안에 끝내야 함" 제약으로 다시 1-seed로 낮춤
-# (유담님 재확정, 2026-08-25 밤). 멀티시드 자체 이득은 여전히 유효 -- 다음 제출로 이월.
-CATBOOST_SEEDS = ENSEMBLE_SEEDS[:1]
+# 최종 통합 재학습에서 5-seed로 복원 (2026-08-26 아침, 배터리/시간 제약 해소).
+CATBOOST_SEEDS = ENSEMBLE_SEEDS[:5]
 
 DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -46,7 +43,11 @@ from experiment_pitchmix_coarse import compute_coarse_pitchmix, COARSE_COLS
 DATA_DIR = "./data"
 TARGET = "control_success"
 
-CATBOOST_BEST_ITERATION = 1412
+# 2026-08-26: 시즌진행분/Track A/reverse_rate/same_hand 반영 후 하이퍼파라미터
+# 재탐색(tune_catboost_v2.py, half_2024 fold, +15.15) 결과로 교체. best_iteration도
+# 새 값(684)으로 갱신 -- 학습률이 커져서(0.047 vs 이전 튜닝값) 더 적은 iteration에
+# 수렴함.
+CATBOOST_BEST_ITERATION = 684
 CATBOOST_ITERATION_BUFFER = 50
 DEFAULT_FULL_RETRAIN_EPOCHS = 20
 FULL_RETRAIN_EPOCH_BUFFER = 5
@@ -59,7 +60,7 @@ META_W_CAT = 2.002827
 META_W_MLP = 1.988260
 META_INTERCEPT = -2.022844
 
-with open("./model_py311/best_catboost_pitchmix_hparams.json") as f:
+with open("./model_py311/best_catboost_hparams_v2.json") as f:
     _tuned = json.load(f)["best_params"]
 
 CATBOOST_PARAMS = dict(
