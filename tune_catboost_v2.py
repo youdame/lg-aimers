@@ -114,7 +114,7 @@ def main():
     print(f"Best iteration: {study.best_trial.user_attrs.get('best_iteration')}", flush=True)
     print("=" * 60, flush=True)
 
-    baseline_score = 744.52  # half_2024, 기존 하이퍼파라미터(시즌진행분+TrackA 적용) 기준
+    baseline_score = 769.10  # half_2024, 기존 하이퍼파라미터(시즌진행분+reverse_rate+TrackA 적용) 기준, 2026-08-26 갱신
     print(f"참고: 기존 하이퍼파라미터 half_2024 점수 = {baseline_score:.2f}", flush=True)
     print(f"Δ = {study.best_value - baseline_score:+.2f}", flush=True)
 
