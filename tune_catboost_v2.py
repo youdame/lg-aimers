@@ -99,7 +99,14 @@ def main():
     print(f"[Tune] train={train_pool.num_row()}행, val={val_pool.num_row()}행, {N_TRIALS}trial 시작", flush=True)
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=42))
+    storage_path = "sqlite:///model_py311/catboost_tune_v2_study.db"
+    study = optuna.create_study(
+        direction="maximize", sampler=optuna.samplers.TPESampler(seed=42),
+        study_name="catboost_v2", storage=storage_path, load_if_exists=True,
+    )
+    n_done = len(study.trials)
+    if n_done > 0:
+        print(f"[체크포인트] {storage_path}에서 완료된 trial {n_done}개 발견, 이어서 진행", flush=True)
 
     def log_cb(study, trial):
         print(f"[Trial {trial.number:03d}] score={trial.value:.2f} "
