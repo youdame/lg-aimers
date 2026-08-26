@@ -81,6 +81,7 @@ script.py와 byte-identical함을 확인). 폐기된 튜닝/quantile 하이브�
 
 | 구분 | 점수 |
 |---|---|
+| 실제 리더보드 (`submit_0826.zip`, reverse_rate+1-seed CatBoost, 2026-08-26 새벽) | 1090대 (정확한 수치는 미기록 — 유담님 구두 확인만 있음, "별로 안 올랐다"는 반응. reverse_rate 실전 효과가 로컬 추정(+17.75~17.96)보다 훨씬 작게(+4.76 수준) 나온 것으로 추정, 로컬>실전 방향이 뒤집힌 드문 사례) |
 | **실제 리더보드 (v7+메타모델, `submit_0825.zip`, 2026-08-25 밤)** | **1085.24 — 신규 최고, 1059.72 대비 +25.52. 메타모델(로지스틱 스태킹) 단독 순수 효과 — reverse_rate/멀티시드/hand_matchup 등 오늘 밤 다른 개선사항은 전혀 안 섞임. 로컬 추정(+14.55)보다 실전이 더 크게 나옴(+25.52) — 시즌진행분 때와 같은 "로컬이 과소평가" 패턴 재확인** |
 | 실제 리더보드 (시즌진행분+Track A 이식, `submit_final_v7_season_trackA.zip`, 2026-08-24) | 1059.72 — 968.15 대비 +91.57. 창현님 저장소 최고(1041.8)도 상회. 로컬 개선폭(705.10→792.22, +87.12)과 실전 개선폭(+91.57)이 거의 일치 — 새 검증 프로토콜이 실전을 잘 예측함을 확인 (§7 참고) |
 | 로컬 (season==2024, F1 미적용) | CatBoost+MLP 블렌드 857.62 |
@@ -1071,6 +1072,21 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
   132numeric+35embed=167 기대). 그대로 재사용됐으면 최종 재학습 후반부에서 shape
   mismatch로 크래시했을 것. 삭제 대신 `_retrain_checkpoint_stale_presame_hand.pkl.bak`로
   이름 변경 보존, 최종 재학습은 체크포인트 없이 처음부터 새로 시작.
+
+### 최종 통합 재학습 완료 및 패키징 (2026-08-26 오후, `full_retrain_blend_f1.py`)
+
+체크포인트 없이 전체 새로 학습(1369784행, F1 필터 후, CatBoost 143개/MLP 139개 피처).
+CatBoost 5-seed 1339.7s(22.3분) + MLP 7-seed 3041.2s(50.7분), 총 4400.9s(73.3분) 소요.
+`submit/model/final_retained_model.pkl`(107.9MB)에 저장.
+
+포함된 개선사항: 시즌진행분/Track A/reverse_rate(전부 기존 채택분) + same_hand(MLP 전용,
+오늘 재확인 채택) + CatBoost 신규 하이퍼파라미터(+15.15, v2 재탐색) + CatBoost 5-seed
+멀티시드 + 기존 MLP 하이퍼파라미터(v2 후보 검증 결과 기존 유지) + 기존 메타모델 계수
+(재추정해도 변화 없음 확인).
+
+5행 test.csv로 격리 디렉토리(`/tmp/smoke_submit/`) 스모크테스트 통과(에러 없음, 5행
+정상 출력). `submit_0826b.zip`(model/final_retained_model.pkl + script.py +
+requirements.txt, 8.4MB)으로 패키징 완료. **제출은 유담님이 직접 진행.**
 
 ## 관련 파일
 
