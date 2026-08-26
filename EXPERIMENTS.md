@@ -1004,8 +1004,16 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
    떨어졌다고 확인됨(2026-08-25, 유담님 전달)** — 원작자 본인의 실전 결과가
    부정적이라 우선순위 낮음. 그래도 우리 구현이 정확히 같은지 불확실해서(K값,
    적용 대상 등) 로컬로 한 번은 확인하되, 기대치는 낮게 잡을 것.
-5. CatBoost/MLP 하이퍼파라미터 재탐색 (`tune_catboost_v2.py`, Optuna 18trial 착수했다
-   중단된 상태)
+5. ~~CatBoost 하이퍼파라미터 재탐색~~ **완료, 채택 (2026-08-26 오전,
+   `tune_catboost_v2.py`, Optuna 25trial, half_2024 fold 단일시드, SQLite
+   체크포인트로 중간에 안전하게 재시작)**. **Best: 784.25 (기존 769.10 대비
+   +15.15)** — `depth=7, learning_rate=0.046773, l2_leaf_reg=19.391490,
+   random_strength=8.254100, bagging_temperature=0.127747, border_count=179,
+   min_data_in_leaf=1, best_iteration=684`. 초반 10여 trial은 baseline을 못
+   넘었으나(TPE 탐색 초반 패턴) 후반부에 depth=7·lr 0.04~0.08·l2 17~30 근방에서
+   수렴. 저장: `model_py311/best_catboost_hparams_v2.json`. **다음 최종
+   재학습에 반영 예정.** MLP 하이퍼파라미터 재탐색(`tune_mlp_v2.py`, 2-seed/trial)
+   이어서 진행 중.
 6. ~~메타모델 계수 재추정~~ **완료, 계수 변경 불필요 (2026-08-26 아침,
    `experiment_meta_refit.py`)**. half_2024 fold, reverse_rate+same_hand 반영된
    CatBoost(5-seed)+MLP(7-seed) 예측값으로 창현님 방법론(70/30 same-regime) 재fitting:
