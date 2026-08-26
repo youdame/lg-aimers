@@ -1006,10 +1006,20 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
    적용 대상 등) 로컬로 한 번은 확인하되, 기대치는 낮게 잡을 것.
 5. CatBoost/MLP 하이퍼파라미터 재탐색 (`tune_catboost_v2.py`, Optuna 18trial 착수했다
    중단된 상태)
-6. **메타모델 계수 재추정** — 오늘 밤은 스킵(시간 때문에 기존 계수로 감). reverse_rate/
-   멀티시드/도메인 피처가 반영된 CatBoost/MLP 예측값으로 half_2024 fold에서
-   70/30 same-regime 재fitting(`experiment_logistic_meta_samefold.py` 방법론
-   그대로) — 지금보다 더 정확한 계수를 얻을 수 있는 순수 업사이드
+6. ~~메타모델 계수 재추정~~ **완료, 계수 변경 불필요 (2026-08-26 아침,
+   `experiment_meta_refit.py`)**. half_2024 fold, reverse_rate+same_hand 반영된
+   CatBoost(5-seed)+MLP(7-seed) 예측값으로 창현님 방법론(70/30 same-regime) 재fitting:
+
+   | | 30% eval 점수 |
+   |---|---|
+   | 고정 alpha=0.45 블렌드 | 809.19 |
+   | 기존 메타모델 계수 그대로 | **817.88** |
+   | 새로 재학습한 메타모델 | 817.77 |
+
+   기존 계수가 새 계수보다 오히려 근소하게 높음(-0.11, 노이즈 수준) — 새 계수
+   (w_cat=2.032209, w_mlp=1.967895, intercept=-2.027641)도 기존과 거의 동일. 둘
+   다 고정 alpha 대비 확실히 우위 재확인(+8~9점). **결론: 기존 계수 유지, 코드
+   변경 없음.**
 7. 오늘 밤 제출 결과 확인 후, 예상과 다르면(특히 로컬 대비 실전이 많이 낮으면) 아껴둔
    제출권으로 원인 분리(reverse_rate만 빼고 재제출 등)
 
