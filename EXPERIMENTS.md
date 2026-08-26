@@ -1059,9 +1059,18 @@ coarse pitchmix) 위에 quantile PLE를 얹어서 재검증하기로 함 — 만
   `{hidden1: 256, hidden2: 64, dropout: 0.353362, lr: 0.006804, weight_decay: 0.023196,
   batch_size: 2048}`. → `model_py311/best_mlp_hparams_v2.json`에 저장. **탐색 순위를
   그대로 신뢰하지 않고**, 기존 프로덕션 하이퍼파라미터 vs 이 후보를 `verify_mlp_hparams_v2.py`로
-  ENSEMBLE_SEEDS 7개 정식 비교 진행 중 — 신규가 이겨야만 채택(진행 상황은 아래 갱신 예정).
+  ENSEMBLE_SEEDS 7개 정식 비교 완료: **기존 789.27 vs 신규 787.64 (Δ=-1.62) — 기존
+  유지, 신규 미채택.** 2-seed 탐색 1등이 정식 7-seed 비교에서는 졌음 — 탐색 순위를
+  그대로 최종 재학습에 반영하지 않고 검증 단계를 거친 게 정확히 유효했던 사례.
+  `mlp_model.py`의 HIDDEN1/HIDDEN2/DROPOUT/LR/WEIGHT_DECAY/BATCH_SIZE **변경 없음.**
 - `full_retrain_blend_f1.py`: `CATBOOST_SEEDS`를 최종 통합 재학습 기준 5-seed로 복원
   (`[:1]`은 어젯밤 배터리 위기 때 임시 조치였음).
+- **체크포인트 오염 발견 및 정리**: 어젯밤 00:03에 저장된 `_retrain_checkpoint.pkl`의
+  MLP 멤버 7개는 same_hand 피처 추가(05:00, `abc8727`) **이전**에 학습된 것이라
+  입력 차원이 안 맞음(mlp.0.weight 165=130numeric+35embed, same_hand 반영 시
+  132numeric+35embed=167 기대). 그대로 재사용됐으면 최종 재학습 후반부에서 shape
+  mismatch로 크래시했을 것. 삭제 대신 `_retrain_checkpoint_stale_presame_hand.pkl.bak`로
+  이름 변경 보존, 최종 재학습은 체크포인트 없이 처음부터 새로 시작.
 
 ## 관련 파일
 
