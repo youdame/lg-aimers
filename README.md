@@ -10,7 +10,7 @@
 | 문제 | 투구별 `control_success` 확률 예측 (평가지표: Brier Skill Score) |
 | 모델 | CatBoost + Tabular MLP, 로지스틱 회귀 스태킹 블렌드 |
 | 피처 | 141개 (원본 47 + 트랙맨 집계 64 + 구종비중 4 + 파생 12 + 시즌 진행분 8 + Track A 6) |
-| 개인 리더보드 기록 | 927 → 968.15 → 1059.72 → 1085.24 (`EXPERIMENTS.md` 기록 기준) |
+| 개인 리더보드 기록 | 927 → 968.15 → 1059.72 → 1085.24 (`docs/EXPERIMENTS.md` 기록 기준) |
 | 가장 중요하게 본 것 | 하나의 검증 시즌만 믿지 않기, 평가 데이터 누수 막기 |
 
 ## 제가 한 일
@@ -24,13 +24,35 @@
 ## 구조
 
 ```text
-feature_engineering.py        피처 정의 (트랙맨 조인, 구종비중, 시즌 진행분, Track A)
-mlp_model.py                  Tabular MLP 모델·전처리·앙상블
-full_retrain_blend_f1.py      실제 학습 파이프라인 (CatBoost + MLP + 블렌드)
-submit/script.py              대회 서버용 독립 추론 코드
-experiment_*.py               가설별 검증 실험 (하나의 가설에 하나의 파일)
-EXPERIMENTS.md                전체 실험 기록: 효과 있었던 것/없었던 것과 이유
-CLAUDE.md                     대회 규칙과 코드 작성 시 지킨 원칙
+.
+├── src/                          공통 모듈
+│   ├── feature_engineering.py    피처 정의 (트랙맨 조인, 시즌 진행분, Track A)
+│   ├── mlp_model.py              Tabular MLP 모델·전처리·앙상블
+│   └── local_validation.py       검증 fold 정의(half_2024 / expand_2023)와 BSS 계산
+├── pipeline/                     최종 모델 학습·분석
+│   ├── full_retrain_blend_f1.py  실제 학습 파이프라인 (CatBoost + MLP + 블렌드)
+│   ├── cache_fold_predictions*.py  메타모델 실험용 fold 예측 캐시
+│   └── analyze_feature_importance.py
+├── tuning/                       하이퍼파라미터 탐색(Optuna)·재검증
+├── experiments/                  가설별 검증 실험 (하나의 가설에 하나의 파일)
+│   └── experiment_pitchmix_coarse.py  구종비중 피처 (다른 스크립트들이 import)
+├── submit/                       대회 서버용 독립 추론 코드 (script.py, requirements.txt)
+├── notebooks/                    대회 제공 베이스라인 노트북
+├── docs/
+│   ├── EXPERIMENTS.md            전체 실험 기록: 효과 있었던 것/없었던 것과 이유
+│   ├── data_description.md       데이터 명세와 공식 규칙
+│   └── feature_importance_results.txt
+└── CLAUDE.md                     대회 규칙과 코드 작성 시 지킨 원칙
+```
+
+## 실행 방법
+
+모든 스크립트는 저장소 루트에서 모듈로 실행합니다 (`./data`, `./model_py311` 상대경로 기준).
+
+```bash
+# 데이터: 대회 사이트에서 받은 train.csv, trackman_history.csv, test.csv를 data/에 배치
+python -m pipeline.full_retrain_blend_f1          # 최종 모델 학습
+python -m experiments.experiment_same_hand        # 개별 실험 재현
 ```
 
 ## 모델
@@ -48,7 +70,7 @@ w_cat=2.002827, w_mlp=1.988260, intercept=-2.022844
 
 ## 실험 기록을 읽는 법
 
-`EXPERIMENTS.md`는 잘 된 것뿐 아니라 **안 된 것과 그 이유**를 같이 적었습니다. 예를 들면 다음과 같습니다.
+[`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md)는 잘 된 것뿐 아니라 **안 된 것과 그 이유**를 같이 적었습니다. 예를 들면 다음과 같습니다.
 
 - 트랙맨 물리량을 빼면 좋아질 거라는 가설 → 실전 955점으로 효과 없음, 종결
 - 개선 사항 전체 반영 시 879.54로 하락 → 범인 후보 3개를 하나씩 빼서 확인했으나 모두 기각
@@ -56,4 +78,4 @@ w_cat=2.002827, w_mlp=1.988260, intercept=-2.022844
 ## 한계
 
 - 최종 점수는 팀 제출 기록과 이 저장소 기록이 다릅니다. 이 저장소에는 제가 직접 제출한 점수만 적었습니다.
-- 대회 데이터는 약관상 재배포할 수 없어 저장소에 포함하지 않았습니다. 실행하려면 대회 사이트에서 받아 `open/data/`에 넣어야 합니다.
+- 대회 데이터는 약관상 재배포할 수 없어 저장소에 포함하지 않았습니다. 실행하려면 대회 사이트에서 받아 `data/`에 넣어야 합니다 (`.gitignore` 처리됨).

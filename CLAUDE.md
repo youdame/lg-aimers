@@ -24,7 +24,7 @@
 
 **실제 발생했던 사고 (2026-08-13 발견, 수정함)**: `submit/script.py`의 `process_trackman_features()`, `add_coarse_pitchmix()`에서 트랙맨 매칭 결측치를 `tr_final[cols].fillna(tr_final[cols].mean())`로 채우고 있었음 — 이 mean이 test.csv(추론 대상) 자체에서 계산됨 → 규칙 위반. 원인: 학습/검증용 함수(`feature_engineering.py::process_trackman_features_safe`, 거기선 train/val 자체 평균이라 문제없음)를 추론 스크립트에 그대로 복사하면서 fillna 로직을 안 바꿈. 창현님 원본 제출 코드(`lgaimers9/submit/script.py`)는 `fillna(0)`(고정값)으로 정상 처리하고 있었음 — 이식 과정에서 생긴 버그였음. **추론 스크립트에서 `.fillna(...mean())` 패턴을 보면 무조건 의심할 것.**
 
-### 2. 투구 시점 이후 확정 정보 사용 금지 (`data_description.md` §6 공식 규칙)
+### 2. 투구 시점 이후 확정 정보 사용 금지 (`docs/data_description.md` §6 공식 규칙)
 
 > 다음 정보는 입력으로 사용할 수 없습니다: 현재 투구 이후에 확정되는 모든 정보 / 현재
 > 투구의 실제 위치 또는 코스 정보 / 현재 투구의 실제 판정·결과·제구 성공 여부 / 현재
@@ -124,6 +124,7 @@ CUDA 12.8, **인터넷 접속 비활성화**(패키지 설치 외 외부 다운�
 
 ## 프로젝트 구조 참고
 
-- `feature_engineering.py`: 학습/검증용 트랙맨 조인 + 파생피처 (시간 마스킹 있음, `.fillna(mean())` 써도 됨 — train/val 자체 데이터라 규칙과 무관)
-- `submit/`, `xgb_submit/`: 실제 제출용 독립 실행 스크립트 (code/ 패키지 미의존 관례) — **여기서는 test.csv 유래 통계로 fillna하면 안 됨, 항상 train.csv/trackman_history.csv에서 미리 계산한 고정값 사용**
-- `experiment_*.py`: 로컬 실험/검증 스크립트, 제출용 아님
+- `src/feature_engineering.py`: 학습/검증용 트랙맨 조인 + 파생피처 (시간 마스킹 있음, `.fillna(mean())` 써도 됨 — train/val 자체 데이터라 규칙과 무관)
+- `submit/`: 실제 제출용 독립 실행 스크립트 (`src/` 등 저장소 패키지 미의존 관례) — **여기서는 test.csv 유래 통계로 fillna하면 안 됨, 항상 train.csv/trackman_history.csv에서 미리 계산한 고정값 사용**
+- `experiments/experiment_*.py`, `tuning/`, `pipeline/`: 로컬 실험·튜닝·학습 스크립트, 제출용 아님. 루트에서 `python -m <폴더>.<파일명>`으로 실행 (`./data`, `./model_py311` 상대경로 기준)
+- `docs/`: `EXPERIMENTS.md`(실험 기록), `data_description.md`(공식 데이터 명세·규칙)
