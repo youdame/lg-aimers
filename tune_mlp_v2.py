@@ -4,7 +4,7 @@
 weight_decay=0.01, batch_size=4096)는 2026-08-16에 튜닝된 값 -- 그 뒤로 시즌진행분/
 Track A/reverse_rate/same_hand가 다 추가돼서 피처셋이 많이 바뀜.
 
-트라이얼당 2-seed 평균(순수 단일시드보다 노이즈 적음, 유담님 확정). half_2024 fold만
+트라이얼당 2-seed 평균(순수 단일시드보다 노이즈 적음, 본인 확정). half_2024 fold만
 사용. Optuna study는 SQLite에 저장(중단돼도 이어서 가능).
 """
 import json

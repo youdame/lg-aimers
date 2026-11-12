@@ -5,7 +5,7 @@ tune_catboost_v2.py는 half_2024 fold **1개, 단일시드**로만 25trial 탐�
 값이라, 그 fold/시드 조합의 노이즈에 과적합됐을 위험이 있음(MLP 튜닝 때 2-seed 탐색
 순위가 7-seed 정식비교에서 뒤집힌 전례가 있어서 동일한 의심 적용). 실전 제출
 (submit_0826b.zip, 1092.55)이 로컬 기대치보다 훨씬 작게 나온 뒤 재검증 필요성이
-제기됨(유담님).
+제기됨(본인).
 
 experiment_catboost_multiseed.py와 동일한 패턴으로, 기존 하이퍼파라미터 vs 신규
 하이퍼파라미터를 **5-seed 앙상블 기준으로, half_2024/expand_2023 양쪽 fold** 다

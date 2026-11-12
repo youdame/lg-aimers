@@ -119,7 +119,7 @@ def main():
 
     # 득점권 압박 플래그: 두 fold 다 플러스(+2.49/+1.40)였지만 CatBoost 시드 노이즈
     # (±4.76)에 근접한 약한 신호라 최종적으로 오늘 밤 번들에서 제외하기로 함
-    # (유담님 판단, 2026-08-25 밤). 함수는 남겨둠(feature_engineering.py 참고),
+    # (본인 판단, 2026-08-25 밤). 함수는 남겨둠(feature_engineering.py 참고),
     # 호출만 안 함 -- 나중에 추가 fold로 재검증하고 싶으면 이 두 줄만 살리면 됨.
 
     # same_hand/same_hand_advantage: MLP 전용(Track A와 반대 라우팅). CatBoost 두 fold
